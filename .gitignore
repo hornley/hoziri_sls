@@ -2,4 +2,6 @@ node_modules/
 uploads/
 data/*.db
 data/*.db-journal
+data/*.db-shm
+data/*.db-wal
 .env
