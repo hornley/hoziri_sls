@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hoziri</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="header-center">
+      <h1>Hoziri</h1>
+      <p>LAN file sharing — Hoziri</p>
+    </div>
+    <div class="header-right">
+      <button id="settings-toggle" class="icon-btn" title="Settings">⚙️</button>
+      <button id="qr-toggle" class="icon-btn" title="Show QR code">📱</button>
+      <button id="theme-toggle" class="icon-btn" title="Toggle dark mode">🌙</button>
+    </div>
+  </header>
+
+  <div id="qr-modal" style="display:none;">
+    <div id="qr-overlay"></div>
+    <div id="qr-content">
+      <button id="qr-close">&times;</button>
+      <h2>Scan to connect</h2>
+      <div id="qr-code"></div>
+      <p id="qr-url"></p>
+    </div>
+  </div>
+
+  <div id="settings-modal" style="display:none;">
+    <div id="settings-overlay"></div>
+    <div id="settings-content">
+      <button id="settings-close">&times;</button>
+      <h2>Settings</h2>
+      <div class="settings-field">
+        <label for="settings-trash-days">Trash retention (days)</label>
+        <input type="number" id="settings-trash-days" min="1" max="365" value="30">
+      </div>
+      <button id="settings-save">Save</button>
+    </div>
+  </div>
+
+  <main>
+    <section id="upload-section">
+      <form id="upload-form">
+        <div id="upload-mode-toggle">
+          <button type="button" class="mode-btn active" data-mode="files">Files</button>
+          <button type="button" class="mode-btn" data-mode="folder">Folder</button>
+        </div>
+        <div id="drop-zone">
+          <p>Drag & drop files here or click to browse</p>
+          <p class="drop-hint">Or press Ctrl+V to paste screenshots</p>
+          <input type="file" id="file-input" name="file" multiple>
+        </div>
+        <div id="pending-section" style="display:none;">
+          <div id="pending-list"></div>
+          <div id="pending-summary"></div>
+        </div>
+        <button type="submit" id="upload-btn">Upload</button>
+      </form>
+      <div id="progress-container" style="display:none;">
+        <progress id="progress-bar" value="0" max="100"></progress>
+        <span id="progress-text">0%</span>
+      </div>
+    </section>
+
+    <section id="files-section">
+      <h2>Uploaded Files</h2>
+      <div id="toolbar">
+        <span id="file-stats" class="toolbar-stats"></span>
+        <input type="text" id="search-input" placeholder="Search files..." class="toolbar-search">
+        <select id="sort-select" class="toolbar-select">
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="name-asc">Name A-Z</option>
+          <option value="name-desc">Name Z-A</option>
+          <option value="smallest">Smallest</option>
+          <option value="largest">Largest</option>
+        </select>
+        <select id="device-filter" class="toolbar-select">
+          <option value="">All devices</option>
+        </select>
+        <button id="trash-toggle" class="toolbar-btn" title="Recently deleted">🗑</button>
+      </div>
+      <div id="file-grid"></div>
+      <div id="pagination" style="display:none;"></div>
+      <div id="trash-section" style="display:none;">
+        <div id="trash-header">
+          <span id="trash-count">Recently deleted</span>
+          <button id="trash-empty-btn">Empty trash</button>
+        </div>
+        <div id="trash-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="multi-toolbar" style="display:none;">
+    <span id="multi-count">0 selected</span>
+    <button id="multi-download-btn">Download</button>
+    <button id="multi-delete-btn">Move to Trash</button>
+    <button id="multi-cancel-btn">Cancel</button>
+  </div>
+
+  <div id="context-menu" style="display:none;"></div>
+
+  <div id="preview-modal" style="display:none;">
+    <div id="preview-overlay"></div>
+    <div id="preview-content">
+      <button id="preview-close">&times;</button>
+      <div id="preview-body"></div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
