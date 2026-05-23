@@ -1279,6 +1279,89 @@ main {
   background: var(--danger-hover);
 }
 
+/* Rename modal */
+#rename-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  align-items: center;
+  justify-content: center;
+}
+
+#rename-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+}
+
+.rename-content {
+  position: relative;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+  max-width: 380px;
+  width: 90vw;
+}
+
+.rename-content h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.rename-content input {
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.rename-content input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.rename-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.rename-actions button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#rename-cancel-btn {
+  background: var(--bg);
+  color: var(--text);
+}
+
+#rename-cancel-btn:hover {
+  background: var(--border-light);
+}
+
+#rename-save-btn {
+  background: var(--primary);
+  color: white;
+}
+
+#rename-save-btn:hover {
+  background: var(--primary-hover);
+}
+
 /* Toast */
 #toast-container {
   position: fixed;

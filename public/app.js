@@ -556,7 +556,7 @@ function showContextMenu(x, y, ctx) {
       <button class="ctx-item" data-action="download">⬇️ Download</button>
       <button class="ctx-item" data-action="delete">🗑 Move to Trash</button>
       <div class="ctx-divider"></div>
-      <button class="ctx-item ctx-placeholder" data-action="rename">✏️ Rename</button>
+      <button class="ctx-item" data-action="rename">✏️ Rename</button>
       ${isText ? `<button class="ctx-item ctx-placeholder" data-action="edit">📝 Edit</button>` : ''}
       <button class="ctx-item ctx-placeholder" data-action="tags">🏷️ Tags</button>
       <button class="ctx-item ctx-placeholder" data-action="move">📂 Move to folder</button>
@@ -570,7 +570,7 @@ function showContextMenu(x, y, ctx) {
       <button class="ctx-item" data-action="download">⬇️ Download</button>
       <button class="ctx-item" data-action="delete">🗑 Delete</button>
       <div class="ctx-divider"></div>
-      <button class="ctx-item ctx-placeholder" data-action="rename">✏️ Rename</button>
+      <button class="ctx-item" data-action="rename">✏️ Rename</button>
       <button class="ctx-item ctx-placeholder" data-action="tags">🏷️ Tags</button>
       <button class="ctx-item ctx-placeholder" data-action="move">📂 Move to folder</button>
       <div class="ctx-divider"></div>
@@ -659,6 +659,10 @@ function showContextMenu(x, y, ctx) {
             fetchFiles();
           });
         }
+      } else if (action === 'rename') {
+        if (file) openRenameModal({ type: 'file', file });
+        else if (isFolder) openRenameModal({ type: 'folder', folderPath: ctx.folderPath });
+        else showToast('Coming soon', 'info');
       } else if (action === 'cancel') {
         // just close
       } else if (item.classList.contains('ctx-placeholder')) {
@@ -930,6 +934,80 @@ function closeSettings() {
   document.body.style.overflow = '';
 }
 
+// ── Rename modal ──
+let renameContext = null;
+
+function nameWithoutExt(filename, ext) {
+  if (!ext) return filename;
+  if (filename.endsWith(ext)) {
+    const base = filename.slice(0, -ext.length);
+    return base || filename;
+  }
+  return filename;
+}
+
+function openRenameModal(ctx) {
+  const title = document.getElementById('rename-title');
+  const input = document.getElementById('rename-input');
+  if (ctx.type === 'file') {
+    renameContext = { type: 'file', storedName: ctx.file.storedName, extension: ctx.file.extension };
+    title.textContent = 'Rename file';
+    input.value = nameWithoutExt(ctx.file.originalName, ctx.file.extension);
+  } else if (ctx.type === 'folder') {
+    const folderName = ctx.folderPath.replace(/\\/g, '/').split('/').pop();
+    renameContext = { type: 'folder', oldPath: ctx.folderPath.replace(/\\/g, '/') };
+    title.textContent = 'Rename folder';
+    input.value = folderName;
+  }
+  document.getElementById('rename-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  input.focus();
+  input.select();
+}
+
+function closeRenameModal() {
+  renameContext = null;
+  document.getElementById('rename-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function setupRenameModal() {
+  document.getElementById('rename-save-btn').addEventListener('click', async () => {
+    if (!renameContext) return;
+    let name = document.getElementById('rename-input').value.trim();
+    if (!name) { showToast('Name cannot be empty', 'error'); return; }
+    try {
+      let res;
+      if (renameContext.type === 'file') {
+        name = name + (renameContext.extension || '');
+        res = await fetch('/api/files/' + renameContext.storedName + '/rename', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+      } else {
+        res = await fetch('/api/folders/rename', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldPath: renameContext.oldPath, name })
+        });
+      }
+      if (!res.ok) { showToast('Rename failed', 'error'); return; }
+      showToast(renameContext.type === 'file' ? 'File renamed' : 'Folder renamed', 'success');
+      closeRenameModal();
+      fetchFiles();
+    } catch { showToast('Rename failed', 'error'); }
+  });
+  document.getElementById('rename-cancel-btn').addEventListener('click', closeRenameModal);
+  document.getElementById('rename-overlay').addEventListener('click', closeRenameModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('rename-modal').style.display === 'flex') closeRenameModal();
+    if (e.key === 'Enter' && document.getElementById('rename-modal').style.display === 'flex') {
+      document.getElementById('rename-save-btn').click();
+    }
+  });
+}
+
 // ── Confirm modal ──
 function showConfirmModal(message, onConfirm) {
   const modal = document.getElementById('confirm-modal');
@@ -1128,6 +1206,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupTrash();
   setupSettings();
   setupMultiToolbar();
+  setupRenameModal();
   // Global keydown for Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {

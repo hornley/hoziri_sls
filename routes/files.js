@@ -276,6 +276,40 @@ router.delete('/files/:id', (req, res) => {
   res.json({ success: true, movedToTrash: true });
 });
 
+router.put('/files/:id/rename', (req, res) => {
+  const record = db.getFileByStoredName(req.params.id);
+  if (!record) return res.status(404).json({ error: 'File not found' });
+  let { name } = req.body;
+  if (!name || typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  name = path.basename(name.trim());
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  if (name.length > 255) return res.status(400).json({ error: 'Name too long' });
+  db.renameFile(record.storedName, name);
+  record.originalName = name;
+  res.json(recordToResponse(record));
+});
+
+router.put('/folders/rename', (req, res) => {
+  const { oldPath, name } = req.body;
+  if (!oldPath || !name) return res.status(400).json({ error: 'oldPath and name are required' });
+  const newName = name.trim().replace(/[/\\]/g, '');
+  if (!newName) return res.status(400).json({ error: 'Invalid folder name' });
+  if (newName === '.' || newName === '..') return res.status(400).json({ error: 'Invalid folder name' });
+  const parentDir = path.posix.dirname(oldPath.replace(/\\/g, '/'));
+  const newPath = parentDir === '.' ? newName : parentDir + '/' + newName;
+  const oldDir = path.join(uploadDir, oldPath);
+  const newDir = path.join(uploadDir, newPath);
+  if (!fs.existsSync(oldDir)) return res.status(404).json({ error: 'Folder not found' });
+  if (fs.existsSync(newDir)) return res.status(409).json({ error: 'Target folder already exists' });
+  try {
+    fs.renameSync(oldDir, newDir);
+  } catch {
+    return res.status(500).json({ error: 'Failed to rename folder' });
+  }
+  db.renameFolder(oldPath.replace(/\\/g, '/'), newPath);
+  res.json({ success: true, oldPath: oldPath.replace(/\\/g, '/'), newPath });
+});
+
 // ── Trash endpoints ──
 router.get('/trash', (req, res) => {
   const items = db.getAllTrash();
