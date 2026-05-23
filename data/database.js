@@ -143,6 +143,14 @@ function getAllFolders() {
   return db.prepare("SELECT DISTINCT folderPath FROM files WHERE folderPath != '' AND folderPath IS NOT NULL ORDER BY folderPath").all().map(r => r.folderPath);
 }
 
+function renameFolder(oldPath, newPath) {
+  const txn = db.transaction(() => {
+    db.prepare('UPDATE files SET folderPath = ? WHERE folderPath = ?').run(newPath, oldPath);
+    db.prepare("UPDATE files SET folderPath = ? || substr(folderPath, ?) WHERE folderPath LIKE ?").run(newPath, oldPath.length + 1, oldPath + '/%');
+  });
+  txn();
+}
+
 // ── Config ──
 function getConfig(key) {
   const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
@@ -192,6 +200,10 @@ function deleteTrashOlderThan(days) {
   return items;
 }
 
+function renameFile(storedName, newName) {
+  db.prepare('UPDATE files SET originalName = ? WHERE storedName = ?').run(newName, storedName);
+}
+
 function getAllDevices() {
   return db.prepare('SELECT DISTINCT deviceInfo FROM files ORDER BY deviceInfo').all().map(r => r.deviceInfo);
 }
@@ -200,4 +212,4 @@ function close() {
   if (db) db.close();
 }
 
-module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, deleteFileByStoredName, deleteFilesByStoredNames, getConfig, setConfig, getAllConfig, getAllDevices, getAllFolders, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
+module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getAllFolders, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };

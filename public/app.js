@@ -327,11 +327,7 @@ function renderFileGrid(files) {
         ${preview}
         <div class="file-name">${escapeHtml(file.originalName)}</div>
         <div class="file-meta">${file.sizeFormatted} &middot; ${file.deviceInfo}</div>
-        <div class="file-actions">
-          <a class="download-btn" href="/api/files/${file.storedName}" download>Download</a>
-          ${copyBtn}
-          <button class="delete-btn" data-stored="${file.storedName}">Delete</button>
-        </div>
+        ${copyBtn ? `<div class="file-actions">${copyBtn}</div>` : ''}
       </div>
     `;
   }
@@ -379,15 +375,10 @@ function renderFileGrid(files) {
     });
 
     card.addEventListener('contextmenu', (e) => {
-      if (multiSelectActive && !selectedFiles.has(stored)) {
-        selectedFiles.add(stored);
-      }
-      if (!multiSelectActive) {
-        enterMultiSelect();
-        selectedFiles.add(stored);
-      }
-      updateMultiUI();
-      showContextMenu(e.clientX, e.clientY);
+      if (!stored) return; // handled by folder card listener
+      const file = filesState.files.find(f => f.storedName === stored);
+      hideContextMenu();
+      showContextMenu(e.clientX, e.clientY, { type: 'file', storedName: stored, file });
       e.preventDefault();
     });
   });
@@ -399,16 +390,6 @@ function renderFileGrid(files) {
       catch { showToast('Failed to copy', 'error'); }
     });
   });
-  grid.querySelectorAll('.delete-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (!confirm('Delete this file?')) return;
-      const stored = btn.dataset.stored;
-      await fetch('/api/files/' + stored, { method: 'DELETE' });
-      showToast('File moved to trash', 'info');
-      fetchFiles();
-    });
-  });
 
   // Folder card clicks
   grid.querySelectorAll('.folder-card').forEach(card => {
@@ -418,7 +399,13 @@ function renderFileGrid(files) {
       exitMultiSelect();
       fetchFiles();
     });
+    card.addEventListener('contextmenu', (e) => {
+      hideContextMenu();
+      showContextMenu(e.clientX, e.clientY, { type: 'folder', folderPath: card.dataset.folder });
+      e.preventDefault();
+    });
   });
+
 
   // Folder breadcrumb back button
   const backBtn = grid.querySelector('.folder-back-btn');
@@ -515,48 +502,84 @@ function updateMultiUI() {
 
 function setupMultiToolbar() {
   document.getElementById('multi-download-btn').addEventListener('click', async () => {
-    for (const stored of selectedFiles) {
-      const a = document.createElement('a');
-      a.href = '/api/files/' + stored;
-      a.download = '';
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      await new Promise(r => setTimeout(r, 200));
+    const ids = Array.from(selectedFiles);
+    if (ids.length === 0) return;
+    if (await downloadAsZip(ids)) {
+      showToast('Downloaded ' + ids.length + ' file(s)', 'success');
+      exitMultiSelect();
     }
-    showToast('Downloaded ' + selectedFiles.size + ' file(s)', 'success');
-    exitMultiSelect();
   });
 
   document.getElementById('multi-delete-btn').addEventListener('click', async () => {
     const ids = Array.from(selectedFiles);
-    if (!confirm('Move ' + ids.length + ' file(s) to trash?')) return;
-    try {
-      const res = await fetch('/api/files/batch-trash', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids })
-      });
-      const data = await res.json();
-      showToast('Moved ' + data.moved.length + ' file(s) to trash', 'info');
-    } catch { showToast('Failed to move files', 'error'); }
-    exitMultiSelect();
-    fetchFiles();
+    showConfirmModal('Move ' + ids.length + ' file(s) to trash?', async () => {
+      try {
+        const res = await fetch('/api/files/batch-trash', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids })
+        });
+        const data = await res.json();
+        showToast('Moved ' + data.moved.length + ' file(s) to trash', 'info');
+      } catch { showToast('Failed to move files', 'error'); }
+      exitMultiSelect();
+      fetchFiles();
+    });
   });
 
   document.getElementById('multi-cancel-btn').addEventListener('click', exitMultiSelect);
 }
 
 // Context menu
-function showContextMenu(x, y) {
+function showContextMenu(x, y, ctx) {
   const menu = document.getElementById('context-menu');
-  menu.innerHTML = `
-    <button class="ctx-item" data-action="download">⬇️ Download</button>
-    <button class="ctx-item" data-action="delete">🗑 Move to Trash</button>
-    <div class="ctx-divider"></div>
-    <button class="ctx-item" data-action="cancel">✕ Cancel selection</button>
-  `;
+  const isFile = ctx.type === 'file';
+  const isFolder = ctx.type === 'folder';
+  const file = ctx.file;
+  const isText = file && isTextFile(file);
+
+  let items = '';
+
+  if (multiSelectActive) {
+    // Multi-select mode — only group actions
+    items = `
+      <button class="ctx-item" data-action="download">⬇️ Download</button>
+      <button class="ctx-item" data-action="delete">🗑 Move to Trash</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item ctx-placeholder" data-action="move">📂 Move to folder</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item" data-action="cancel">✕ Cancel</button>
+    `;
+  } else if (isFile) {
+    // Single file
+    items = `
+      <button class="ctx-item" data-action="preview">👁️ View / Preview</button>
+      <button class="ctx-item" data-action="download">⬇️ Download</button>
+      <button class="ctx-item" data-action="delete">🗑 Move to Trash</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item" data-action="rename">✏️ Rename</button>
+      ${isText ? `<button class="ctx-item ctx-placeholder" data-action="edit">📝 Edit</button>` : ''}
+      <button class="ctx-item ctx-placeholder" data-action="tags">🏷️ Tags</button>
+      <button class="ctx-item ctx-placeholder" data-action="move">📂 Move to folder</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item" data-action="cancel">✕ Cancel</button>
+    `;
+  } else if (isFolder) {
+    // Folder
+    items = `
+      <button class="ctx-item" data-action="open">📂 Open</button>
+      <button class="ctx-item" data-action="download">⬇️ Download</button>
+      <button class="ctx-item" data-action="delete">🗑 Delete</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item" data-action="rename">✏️ Rename</button>
+      <button class="ctx-item ctx-placeholder" data-action="tags">🏷️ Tags</button>
+      <button class="ctx-item ctx-placeholder" data-action="move">📂 Move to folder</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item" data-action="cancel">✕ Cancel</button>
+    `;
+  }
+
+  menu.innerHTML = items;
   menu.style.display = 'block';
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
@@ -567,11 +590,86 @@ function showContextMenu(x, y) {
   if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 10) + 'px';
 
   menu.querySelectorAll('.ctx-item').forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', async () => {
       const action = item.dataset.action;
-      if (action === 'download') document.getElementById('multi-download-btn').click();
-      else if (action === 'delete') document.getElementById('multi-delete-btn').click();
-      else if (action === 'cancel') exitMultiSelect();
+
+      if (action === 'preview' && file) {
+        openPreview(file);
+      } else if (action === 'open' && isFolder) {
+        currentFolder = ctx.folderPath;
+        currentPage = 1;
+        exitMultiSelect();
+        fetchFiles();
+      } else if (action === 'download') {
+        if (isFolder) {
+          const res = await fetch('/api/files?folder=' + encodeURIComponent(ctx.folderPath) + '&limit=200');
+          const data = await res.json();
+          const ids = data.files.map(f => f.storedName);
+          await downloadAsZip(ids, ctx.folderPath.replace(/[/\\]/g, '_') + '.zip');
+        } else if (multiSelectActive) {
+          const ids = Array.from(selectedFiles);
+          if (ids.length > 0 && await downloadAsZip(ids)) {
+            showToast('Downloaded ' + ids.length + ' file(s)', 'success');
+            exitMultiSelect();
+          }
+        } else {
+          const a = document.createElement('a');
+          a.href = '/api/files/' + ctx.storedName;
+          a.download = '';
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      } else if (action === 'delete') {
+        if (isFolder) {
+          showConfirmModal('Delete all files in this folder?', async () => {
+            const res = await fetch('/api/files?folder=' + encodeURIComponent(ctx.folderPath) + '&limit=200');
+            const data = await res.json();
+            const ids = data.files.map(f => f.storedName);
+            if (ids.length > 0) {
+              await fetch('/api/files/batch-trash', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids })
+              });
+              showToast('Folder moved to trash', 'info');
+              fetchFiles();
+            }
+          });
+        } else if (multiSelectActive) {
+          const ids = Array.from(selectedFiles);
+          if (ids.length > 0) {
+            showConfirmModal('Move ' + ids.length + ' file(s) to trash?', async () => {
+              try {
+                const res = await fetch('/api/files/batch-trash', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ ids })
+                });
+                const data = await res.json();
+                showToast('Moved ' + data.moved.length + ' file(s) to trash', 'info');
+              } catch { showToast('Failed to move files', 'error'); }
+              exitMultiSelect();
+              fetchFiles();
+            });
+          }
+        } else {
+          showConfirmModal('Delete this file?', async () => {
+            await fetch('/api/files/' + ctx.storedName, { method: 'DELETE' });
+            showToast('File moved to trash', 'info');
+            fetchFiles();
+          });
+        }
+      } else if (action === 'rename') {
+        if (file) openRenameModal({ type: 'file', file });
+        else if (isFolder) openRenameModal({ type: 'folder', folderPath: ctx.folderPath });
+        else showToast('Coming soon', 'info');
+      } else if (action === 'cancel') {
+        // just close
+      } else if (item.classList.contains('ctx-placeholder')) {
+        showToast('Coming soon', 'info');
+      }
+
       hideContextMenu();
     });
   });
@@ -579,6 +677,37 @@ function showContextMenu(x, y) {
   setTimeout(() => {
     document.addEventListener('click', hideContextMenu, { once: true });
   }, 0);
+}
+
+async function downloadAsZip(ids, filename) {
+  if (!ids || ids.length === 0) return false;
+  try {
+    const res = await fetch('/api/files/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!res.ok) {
+      console.error('downloadAsZip: server returned', res.status, res.statusText);
+      showToast('Download failed', 'error');
+      return false;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'files.zip';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    return true;
+  } catch (err) {
+    console.error('downloadAsZip: exception', err);
+    showToast('Download failed', 'error');
+    return false;
+  }
 }
 
 function hideContextMenu() {
@@ -708,7 +837,6 @@ async function showTrash() {
   document.getElementById('pagination').style.display = 'none';
   const section = document.getElementById('trash-section');
   section.style.display = 'block';
-  document.getElementById('trash-toggle').textContent = '📁';
   try {
     const res = await fetch('/api/trash');
     const items = await res.json();
@@ -738,10 +866,12 @@ async function showTrash() {
     });
     list.querySelectorAll('.perm-delete-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Permanently delete this file?')) return;
-        await fetch('/api/trash/' + btn.dataset.stored, { method: 'DELETE' });
-        showToast('File permanently deleted', 'info');
-        showTrash();
+        const stored = btn.dataset.stored;
+        showConfirmModal('Permanently delete this file?', async () => {
+          await fetch('/api/trash/' + stored, { method: 'DELETE' });
+          showToast('File permanently deleted', 'info');
+          showTrash();
+        });
       });
     });
   } catch { showToast('Failed to load trash', 'error'); }
@@ -751,16 +881,16 @@ function hideTrash() {
   showingTrash = false;
   document.getElementById('trash-section').style.display = 'none';
   document.getElementById('file-grid').style.display = '';
-  document.getElementById('trash-toggle').textContent = '🗑';
   fetchFiles();
 }
 
 function setupTrash() {
   document.getElementById('trash-empty-btn').addEventListener('click', async () => {
-    if (!confirm('Permanently delete all files in trash?')) return;
-    await fetch('/api/trash', { method: 'DELETE' });
-    showToast('Trash emptied', 'info');
-    showTrash();
+    showConfirmModal('Permanently delete all files in trash?', async () => {
+      await fetch('/api/trash', { method: 'DELETE' });
+      showToast('Trash emptied', 'info');
+      showTrash();
+    });
   });
 }
 
@@ -803,6 +933,103 @@ async function setupSettings() {
 function closeSettings() {
   document.getElementById('settings-modal').style.display = 'none';
   document.body.style.overflow = '';
+}
+
+// ── Rename modal ──
+let renameContext = null;
+
+function nameWithoutExt(filename, ext) {
+  if (!ext) return filename;
+  if (filename.endsWith(ext)) {
+    const base = filename.slice(0, -ext.length);
+    return base || filename;
+  }
+  return filename;
+}
+
+function openRenameModal(ctx) {
+  const title = document.getElementById('rename-title');
+  const input = document.getElementById('rename-input');
+  if (ctx.type === 'file') {
+    renameContext = { type: 'file', storedName: ctx.file.storedName, extension: ctx.file.extension };
+    title.textContent = 'Rename file';
+    input.value = nameWithoutExt(ctx.file.originalName, ctx.file.extension);
+  } else if (ctx.type === 'folder') {
+    const folderName = ctx.folderPath.replace(/\\/g, '/').split('/').pop();
+    renameContext = { type: 'folder', oldPath: ctx.folderPath.replace(/\\/g, '/') };
+    title.textContent = 'Rename folder';
+    input.value = folderName;
+  }
+  document.getElementById('rename-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  input.focus();
+  input.select();
+}
+
+function closeRenameModal() {
+  renameContext = null;
+  document.getElementById('rename-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function setupRenameModal() {
+  document.getElementById('rename-save-btn').addEventListener('click', async () => {
+    if (!renameContext) return;
+    let name = document.getElementById('rename-input').value.trim();
+    if (!name) { showToast('Name cannot be empty', 'error'); return; }
+    try {
+      let res;
+      if (renameContext.type === 'file') {
+        name = name + (renameContext.extension || '');
+        res = await fetch('/api/files/' + renameContext.storedName + '/rename', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+      } else {
+        res = await fetch('/api/folders/rename', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldPath: renameContext.oldPath, name })
+        });
+      }
+      if (!res.ok) { showToast('Rename failed', 'error'); return; }
+      showToast(renameContext.type === 'file' ? 'File renamed' : 'Folder renamed', 'success');
+      closeRenameModal();
+      fetchFiles();
+    } catch { showToast('Rename failed', 'error'); }
+  });
+  document.getElementById('rename-cancel-btn').addEventListener('click', closeRenameModal);
+  document.getElementById('rename-overlay').addEventListener('click', closeRenameModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('rename-modal').style.display === 'flex') closeRenameModal();
+    if (e.key === 'Enter' && document.getElementById('rename-modal').style.display === 'flex') {
+      document.getElementById('rename-save-btn').click();
+    }
+  });
+}
+
+// ── Confirm modal ──
+function showConfirmModal(message, onConfirm) {
+  const modal = document.getElementById('confirm-modal');
+  document.getElementById('confirm-message').textContent = message;
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  function cleanup() {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+    document.getElementById('confirm-ok-btn').removeEventListener('click', onOk);
+    document.getElementById('confirm-cancel-btn').removeEventListener('click', onCancel);
+    document.getElementById('confirm-overlay').removeEventListener('click', onCancel);
+  }
+
+  function onOk() { cleanup(); if (onConfirm) onConfirm(); }
+  function onCancel() { cleanup(); }
+
+  document.getElementById('confirm-ok-btn').addEventListener('click', onOk);
+  document.getElementById('confirm-cancel-btn').addEventListener('click', onCancel);
+  document.getElementById('confirm-overlay').addEventListener('click', onCancel);
 }
 
 // ── Upload ──
@@ -980,6 +1207,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupTrash();
   setupSettings();
   setupMultiToolbar();
+  setupRenameModal();
   // Global keydown for Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
