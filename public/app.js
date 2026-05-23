@@ -37,6 +37,13 @@ let metadataOptions = {
 let selectedFiles = new Set();
 let multiSelectActive = false;
 let longPressTimer = null;
+let dragSelecting = false;
+let dragStart = null;
+let dragLastPoint = null;
+let dragRafId = null;
+let selectionBox = null;
+
+let trashState = { items: [] };
 
 let allDevices = [];
 let allFolders = [];
@@ -599,6 +606,7 @@ function enterMultiSelect() {
   multiSelectActive = true;
   document.body.classList.add('multiselect-active');
   document.getElementById('multi-toolbar').classList.add('visible');
+  updateMultiToolbarForContext();
 }
 
 function exitMultiSelect() {
@@ -616,7 +624,8 @@ function toggleFileSelection(storedName) {
   updateMultiUI();
 }
 
-function updateMultiUI() {
+function updateMultiUI(options = {}) {
+  const { skipRender = false } = options;
   const count = selectedFiles.size;
   const toolbar = document.getElementById('multi-toolbar');
   document.getElementById('multi-count').textContent = count + ' file' + (count !== 1 ? 's' : '') + ' selected';
@@ -625,38 +634,109 @@ function updateMultiUI() {
     document.body.classList.remove('multiselect-active');
     multiSelectActive = false;
   }
+  if (skipRender || dragSelecting) {
+    syncCardSelectionClasses();
+    return;
+  }
   // Re-render file grid to update check overlays without losing page
-  if (!showingTrash) renderFileGrid(filesState.files);
+  if (showingTrash) renderTrashGrid(trashState.items);
+  else renderFileGrid(filesState.files);
+}
+
+function syncCardSelectionClasses() {
+  const cards = getSelectableCards();
+  cards.forEach(card => {
+    card.classList.toggle('selected', selectedFiles.has(card.dataset.stored));
+  });
 }
 
 function setupMultiToolbar() {
   document.getElementById('multi-download-btn').addEventListener('click', async () => {
-    const ids = Array.from(selectedFiles);
-    if (ids.length === 0) return;
-    if (await downloadAsZip(ids)) {
-      showToast('Downloaded ' + ids.length + ' file(s)', 'success');
-      exitMultiSelect();
-    }
+    if (showingTrash) restoreSelectedFromTrash();
+    else downloadSelectedFiles();
   });
 
   document.getElementById('multi-delete-btn').addEventListener('click', async () => {
-    const ids = Array.from(selectedFiles);
-    showConfirmModal('Move ' + ids.length + ' file(s) to trash?', async () => {
-      try {
-        const res = await fetch('/api/files/batch-trash', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids })
-        });
-        const data = await res.json();
-        showToast('Moved ' + data.moved.length + ' file(s) to trash', 'info');
-      } catch { showToast('Failed to move files', 'error'); }
-      exitMultiSelect();
-      fetchFiles();
-    });
+    if (showingTrash) permanentlyDeleteSelectedFromTrash();
+    else moveSelectedFilesToTrash();
   });
 
   document.getElementById('multi-cancel-btn').addEventListener('click', exitMultiSelect);
+}
+
+function updateMultiToolbarForContext() {
+  const downloadBtn = document.getElementById('multi-download-btn');
+  const deleteBtn = document.getElementById('multi-delete-btn');
+  if (!downloadBtn || !deleteBtn) return;
+  if (showingTrash) {
+    downloadBtn.textContent = 'Restore';
+    deleteBtn.textContent = 'Delete';
+  } else {
+    downloadBtn.textContent = 'Download';
+    deleteBtn.textContent = 'Trash';
+  }
+}
+
+async function downloadSelectedFiles() {
+  const ids = Array.from(selectedFiles);
+  if (ids.length === 0) return;
+  if (await downloadAsZip(ids)) {
+    showToast('Downloaded ' + ids.length + ' file(s)', 'success');
+    exitMultiSelect();
+  }
+}
+
+function moveSelectedFilesToTrash() {
+  const ids = Array.from(selectedFiles);
+  if (ids.length === 0) return;
+  showConfirmModal('Move ' + ids.length + ' file(s) to trash?', async () => {
+    try {
+      const res = await fetch('/api/files/batch-trash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      const data = await res.json();
+      showToast('Moved ' + data.moved.length + ' file(s) to trash', 'info');
+    } catch { showToast('Failed to move files', 'error'); }
+    exitMultiSelect();
+    fetchFiles();
+  });
+}
+
+function restoreSelectedFromTrash() {
+  const ids = Array.from(selectedFiles);
+  if (ids.length === 0) return;
+  showConfirmModal('Restore ' + ids.length + ' file(s) from trash?', async () => {
+    let restored = 0;
+    await Promise.all(ids.map(async (id) => {
+      try {
+        const res = await fetch('/api/trash/' + id + '/restore', { method: 'POST' });
+        if (res.ok) restored += 1;
+      } catch {}
+    }));
+    showToast('Restored ' + restored + ' file(s)', 'success');
+    exitMultiSelect();
+    showTrash();
+    fetchFiles();
+  });
+}
+
+function permanentlyDeleteSelectedFromTrash() {
+  const ids = Array.from(selectedFiles);
+  if (ids.length === 0) return;
+  showConfirmModal('Permanently delete ' + ids.length + ' file(s)?', async () => {
+    let deleted = 0;
+    await Promise.all(ids.map(async (id) => {
+      try {
+        const res = await fetch('/api/trash/' + id, { method: 'DELETE' });
+        if (res.ok) deleted += 1;
+      } catch {}
+    }));
+    showToast('Deleted ' + deleted + ' file(s)', 'info');
+    exitMultiSelect();
+    showTrash();
+  });
 }
 
 // Context menu
@@ -997,75 +1077,119 @@ function closePreview() {
 // ── Trash ──
 async function showTrash() {
   showingTrash = true;
+  trashState.items = [];
   document.getElementById('pagination').style.display = 'none';
   document.getElementById('upload-section').style.display = 'none';
   document.getElementById('trash-section').style.display = 'block';
   document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
   const trashSidebarBtn = document.getElementById('sidebar-trash');
   if (trashSidebarBtn) trashSidebarBtn.classList.add('active');
+  updateMultiToolbarForContext();
   try {
     const res = await fetch('/api/trash');
     const items = await res.json();
-    const grid = document.getElementById('file-grid');
+    trashState.items = items;
     document.getElementById('trash-count').textContent = items.length + ' file' + (items.length !== 1 ? 's' : '') + ' in trash';
-    grid.style.display = 'grid';
-    if (items.length === 0) {
-      grid.innerHTML = '<div class="empty-state">Trash is empty</div>';
-      return;
-    }
-    grid.innerHTML = items.map(item => {
-      const icon = getFileIcon(item.extension, item.mimeType);
-      const preview = item.isImage
-        ? `<img class="preview" src="${item.url}" alt="${item.originalName}" loading="lazy">`
-        : (icon ? `<div class="file-icon">${icon}</div>` : `<div class="file-icon">📄</div>`);
-      return `
-        <div class="file-card trash-card" data-stored="${escapeHtml(item.storedName)}">
-          ${preview}
-          <div class="file-name">${escapeHtml(item.originalName)}</div>
-          <div class="file-meta">${item.sizeFormatted} &middot; ${item.deviceInfo}</div>
-          <div class="file-actions trash-actions">
-            <button class="restore-btn" data-stored="${escapeHtml(item.storedName)}">Restore</button>
-            <button class="perm-delete-btn" data-stored="${escapeHtml(item.storedName)}">Delete</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-    grid.querySelectorAll('.restore-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await fetch('/api/trash/' + btn.dataset.stored + '/restore', { method: 'POST' });
-        showToast('File restored', 'success');
-        showTrash();
-        fetchFiles();
-      });
-    });
-    grid.querySelectorAll('.perm-delete-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const stored = btn.dataset.stored;
-        showConfirmModal('Permanently delete this file?', async () => {
-          await fetch('/api/trash/' + stored, { method: 'DELETE' });
-          showToast('File permanently deleted', 'info');
-          showTrash();
-        });
-      });
-    });
-    // Click on trash card to open preview
-    grid.querySelectorAll('.trash-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const stored = card.dataset.stored;
-        const item = items.find(f => f.storedName === stored);
-        if (item) openPreview(item);
-      });
-    });
-    // Empty area context menu in trash
-    grid.addEventListener('contextmenu', (e) => {
-      if (e.target.closest('.trash-card')) return;
-      e.preventDefault();
-      hideContextMenu();
-      showContextMenu(e.clientX, e.clientY, { type: 'empty' });
-    });
+    renderTrashGrid(items);
   } catch { showToast('Failed to load trash', 'error'); }
+}
+
+function renderTrashGrid(items) {
+  const grid = document.getElementById('file-grid');
+  grid.style.display = 'grid';
+  if (items.length === 0) {
+    grid.innerHTML = '<div class="empty-state">Trash is empty</div>';
+    return;
+  }
+  grid.innerHTML = items.map(item => {
+    const isSelected = selectedFiles.has(item.storedName);
+    const icon = getFileIcon(item.extension, item.mimeType);
+    const preview = item.isImage
+      ? `<img class="preview" src="${item.url}" alt="${item.originalName}" loading="lazy">`
+      : (icon ? `<div class="file-icon">${icon}</div>` : `<div class="file-icon">📄</div>`);
+    const selectedClass = isSelected ? ' selected' : '';
+    return `
+      <div class="file-card trash-card${selectedClass}" data-stored="${escapeHtml(item.storedName)}">
+        <div class="check-overlay">✓</div>
+        ${preview}
+        <div class="file-name">${escapeHtml(item.originalName)}</div>
+        <div class="file-meta">${item.sizeFormatted} &middot; ${item.deviceInfo}</div>
+        <div class="file-actions trash-actions">
+          <button class="restore-btn" data-stored="${escapeHtml(item.storedName)}">Restore</button>
+          <button class="perm-delete-btn" data-stored="${escapeHtml(item.storedName)}">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.restore-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await fetch('/api/trash/' + btn.dataset.stored + '/restore', { method: 'POST' });
+      showToast('File restored', 'success');
+      showTrash();
+      fetchFiles();
+    });
+  });
+  grid.querySelectorAll('.perm-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const stored = btn.dataset.stored;
+      showConfirmModal('Permanently delete this file?', async () => {
+        await fetch('/api/trash/' + stored, { method: 'DELETE' });
+        showToast('File permanently deleted', 'info');
+        showTrash();
+      });
+    });
+  });
+  // Click on trash card to open preview
+  grid.querySelectorAll('.trash-card').forEach(card => {
+    const stored = card.dataset.stored;
+    let holdTimer = null;
+    card.addEventListener('touchstart', (e) => {
+      if (e.target.closest('.trash-actions')) return;
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        e.preventDefault();
+        enterMultiSelect();
+        toggleFileSelection(stored);
+      }, 500);
+    });
+    card.addEventListener('touchend', () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    });
+    card.addEventListener('touchmove', () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    });
+
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.trash-actions')) return;
+      if (e.ctrlKey || e.metaKey) {
+        enterMultiSelect();
+        toggleFileSelection(stored);
+        return;
+      }
+      if (multiSelectActive) {
+        toggleFileSelection(stored);
+        return;
+      }
+      const item = items.find(f => f.storedName === stored);
+      if (item) openPreview(item);
+    });
+  });
+  // Empty area context menu in trash
+  grid.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.trash-card')) return;
+    e.preventDefault();
+    hideContextMenu();
+    showContextMenu(e.clientX, e.clientY, { type: 'empty' });
+  });
 }
 
 function hideTrash() {
@@ -1076,6 +1200,7 @@ function hideTrash() {
   const allFilesBtn = document.getElementById('sidebar-all-files');
   if (allFilesBtn) allFilesBtn.classList.add('active');
   setMobileNavActive('all');
+  updateMultiToolbarForContext();
   fetchFiles();
 }
 
@@ -1086,6 +1211,167 @@ function setupTrash() {
       showToast('Trash emptied', 'info');
       showTrash();
     });
+  });
+}
+
+function isTypingTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
+}
+
+function isModalOpen() {
+  const modalIds = [
+    'preview-modal',
+    'confirm-modal',
+    'rename-modal',
+    'settings-modal',
+    'qr-modal',
+    'filters-modal'
+  ];
+  return modalIds.some(id => {
+    const el = document.getElementById(id);
+    return el && el.style.display === 'flex';
+  });
+}
+
+function getSelectableCards() {
+  const grid = document.getElementById('file-grid');
+  if (!grid) return [];
+  return Array.from(grid.querySelectorAll('.file-card[data-stored]'));
+}
+
+function ensureSelectionBox() {
+  if (selectionBox) return selectionBox;
+  const grid = document.getElementById('file-grid');
+  if (!grid) return null;
+  selectionBox = document.createElement('div');
+  selectionBox.className = 'selection-box';
+  grid.appendChild(selectionBox);
+  return selectionBox;
+}
+
+function clearSelectionBox() {
+  if (selectionBox && selectionBox.parentNode) {
+    selectionBox.parentNode.removeChild(selectionBox);
+  }
+  selectionBox = null;
+}
+
+function buildSelectionRect(start, current) {
+  const x1 = Math.min(start.x, current.x);
+  const y1 = Math.min(start.y, current.y);
+  const x2 = Math.max(start.x, current.x);
+  const y2 = Math.max(start.y, current.y);
+  return { left: x1, top: y1, right: x2, bottom: y2 };
+}
+
+function rectsIntersect(a, b) {
+  return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+}
+
+function updateSelectionBoxPosition(rect) {
+  const grid = document.getElementById('file-grid');
+  if (!grid || !selectionBox) return;
+  const gridRect = grid.getBoundingClientRect();
+  const left = rect.left - gridRect.left;
+  const top = rect.top - gridRect.top;
+  const width = rect.right - rect.left;
+  const height = rect.bottom - rect.top;
+  selectionBox.style.left = left + 'px';
+  selectionBox.style.top = top + 'px';
+  selectionBox.style.width = width + 'px';
+  selectionBox.style.height = height + 'px';
+}
+
+function applySelectionFromRect(rect) {
+  const cards = getSelectableCards();
+  selectedFiles.clear();
+  cards.forEach(card => {
+    const cardRect = card.getBoundingClientRect();
+    if (rectsIntersect(rect, cardRect)) selectedFiles.add(card.dataset.stored);
+  });
+  updateMultiUI({ skipRender: true });
+}
+
+function scheduleDragUpdate() {
+  if (dragRafId) return;
+  dragRafId = window.requestAnimationFrame(() => {
+    dragRafId = null;
+    if (!dragSelecting || !dragStart || !dragLastPoint) return;
+    const rect = buildSelectionRect(dragStart, dragLastPoint);
+    updateSelectionBoxPosition(rect);
+    applySelectionFromRect(rect);
+  });
+}
+
+function startDragSelect(e) {
+  if (e.button !== 0) return;
+  if (isModalOpen()) return;
+  if (e.target.closest('.file-card, .folder-card, .folder-breadcrumb, .trash-actions')) return;
+  dragSelecting = true;
+  dragStart = { x: e.clientX, y: e.clientY };
+  dragLastPoint = { x: e.clientX, y: e.clientY };
+  enterMultiSelect();
+  ensureSelectionBox();
+  const rect = buildSelectionRect(dragStart, dragLastPoint);
+  updateSelectionBoxPosition(rect);
+  applySelectionFromRect(rect);
+  document.body.classList.add('drag-selecting');
+  e.preventDefault();
+}
+
+function updateDragSelect(e) {
+  if (!dragSelecting) return;
+  dragLastPoint = { x: e.clientX, y: e.clientY };
+  scheduleDragUpdate();
+}
+
+function finishDragSelect() {
+  if (!dragSelecting) return;
+  dragSelecting = false;
+  if (dragRafId) {
+    window.cancelAnimationFrame(dragRafId);
+    dragRafId = null;
+  }
+  if (dragStart && dragLastPoint) {
+    const rect = buildSelectionRect(dragStart, dragLastPoint);
+    updateSelectionBoxPosition(rect);
+    applySelectionFromRect(rect);
+  }
+  dragStart = null;
+  dragLastPoint = null;
+  clearSelectionBox();
+  document.body.classList.remove('drag-selecting');
+  updateMultiUI({ skipRender: true });
+}
+
+function setupDragSelect() {
+  const grid = document.getElementById('file-grid');
+  if (!grid) return;
+  grid.addEventListener('mousedown', startDragSelect);
+  grid.addEventListener('mousemove', updateDragSelect);
+  document.addEventListener('mouseup', finishDragSelect);
+}
+
+function setupKeyboardShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    if (isTypingTarget(e.target) || isModalOpen()) return;
+    const isSelectAll = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a';
+    if (isSelectAll) {
+      e.preventDefault();
+      const cards = getSelectableCards();
+      selectedFiles.clear();
+      cards.forEach(card => selectedFiles.add(card.dataset.stored));
+      if (selectedFiles.size > 0) enterMultiSelect();
+      updateMultiUI();
+      return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFiles.size > 0) {
+      e.preventDefault();
+      if (showingTrash) permanentlyDeleteSelectedFromTrash();
+      else moveSelectedFilesToTrash();
+    }
   });
 }
 
@@ -1760,6 +2046,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupMultiToolbar();
   setupRenameModal();
   setupFiltersModal();
+  setupDragSelect();
+  setupKeyboardShortcuts();
   // Global keydown for Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
