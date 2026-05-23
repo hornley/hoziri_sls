@@ -115,10 +115,14 @@ router.get('/network-info', (req, res) => {
 });
 
 router.get('/files', (req, res) => {
-  const { page, limit, search, sort, device } = req.query;
-  const result = db.getFilesFiltered({ page, limit, search, sort, device });
+  const { page, limit, search, sort, device, folder } = req.query;
+  const result = db.getFilesFiltered({ page, limit, search, sort, device, folder });
   result.files = result.files.map(recordToResponse);
   res.json(result);
+});
+
+router.get('/files/folders', (req, res) => {
+  res.json({ folders: db.getAllFolders() });
 });
 
 router.get('/files/devices', (req, res) => {
@@ -158,6 +162,31 @@ router.post('/upload', async (req, res) => {
   }
 
   res.status(201).json(recordToResponse(record));
+});
+
+router.post('/files/download', async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids must be a non-empty array' });
+
+  const archiver = require('archiver');
+  const archive = archiver('zip', { zlib: { level: 5 } });
+
+  archive.on('error', (err) => {
+    if (!res.headersSent) res.status(500).json({ error: 'Zip failed' });
+    else res.end();
+  });
+  res.attachment('files.zip');
+  archive.pipe(res);
+
+  for (const storedName of ids) {
+    const record = db.getFileByStoredName(storedName);
+    if (!record) continue;
+    const filePath = getFilePath(record);
+    if (!fs.existsSync(filePath)) continue;
+    archive.file(filePath, { name: record.originalName });
+  }
+
+  await archive.finalize();
 });
 
 router.post('/files/batch-delete', (req, res) => {

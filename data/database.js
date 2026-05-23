@@ -89,7 +89,7 @@ function deleteFilesByStoredNames(names) {
 }
 
 // ── Paginated filtered query ──
-function getFilesFiltered({ page = 1, limit = 50, search = '', sort = 'newest', device = '' }) {
+function getFilesFiltered({ page = 1, limit = 50, search = '', sort = 'newest', device = '', folder = '' }) {
   page = Math.max(1, parseInt(page, 10) || 1);
   limit = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
   const offset = (page - 1) * limit;
@@ -104,6 +104,13 @@ function getFilesFiltered({ page = 1, limit = 50, search = '', sort = 'newest', 
   if (search) {
     clauses.push('originalName LIKE ?');
     params.push('%' + search.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%');
+  }
+  if (folder) {
+    clauses.push('folderPath = ?');
+    params.push(folder);
+  } else {
+    clauses.push('(folderPath = ? OR folderPath IS NULL)');
+    params.push('');
   }
 
   const where = clauses.length > 0 ? 'WHERE ' + clauses.join(' AND ') : '';
@@ -130,6 +137,10 @@ function getFilesFiltered({ page = 1, limit = 50, search = '', sort = 'newest', 
     limit,
     totalPages: Math.ceil(total / limit),
   };
+}
+
+function getAllFolders() {
+  return db.prepare("SELECT DISTINCT folderPath FROM files WHERE folderPath != '' AND folderPath IS NOT NULL ORDER BY folderPath").all().map(r => r.folderPath);
 }
 
 // ── Config ──
@@ -189,4 +200,4 @@ function close() {
   if (db) db.close();
 }
 
-module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, deleteFileByStoredName, deleteFilesByStoredNames, getConfig, setConfig, getAllConfig, getAllDevices, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
+module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, deleteFileByStoredName, deleteFilesByStoredNames, getConfig, setConfig, getAllConfig, getAllDevices, getAllFolders, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };

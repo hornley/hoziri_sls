@@ -9,9 +9,11 @@
 </head>
 <body>
   <header>
+    <div class="header-left">
+      <button id="hamburger-btn" class="icon-btn" title="Menu">☰</button>
+    </div>
     <div class="header-center">
       <h1>Hoziri</h1>
-      <p>LAN file sharing — Hoziri</p>
     </div>
     <div class="header-right">
       <button id="settings-toggle" class="icon-btn" title="Settings">⚙️</button>
@@ -19,6 +21,24 @@
       <button id="theme-toggle" class="icon-btn" title="Toggle dark mode">🌙</button>
     </div>
   </header>
+
+  <div id="drawer-overlay"></div>
+  <div id="side-drawer">
+    <div class="drawer-header">
+      <span class="drawer-title">Menu</span>
+      <button id="drawer-close">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div id="drawer-stats" class="drawer-item drawer-stats"></div>
+      <div class="drawer-divider"></div>
+      <button id="drawer-qr" class="drawer-item">📱 Show QR code</button>
+      <button id="drawer-theme" class="drawer-item">🌙 Dark mode</button>
+      <div class="drawer-divider"></div>
+      <button id="drawer-files" class="drawer-item">📁 Files</button>
+      <button id="drawer-trash" class="drawer-item">🗑 Trash</button>
+      <button id="drawer-settings" class="drawer-item">⚙️ Settings</button>
+    </div>
+  </div>
 
   <div id="qr-modal" style="display:none;">
     <div id="qr-overlay"></div>
@@ -83,7 +103,6 @@
         <select id="device-filter" class="toolbar-select">
           <option value="">All devices</option>
         </select>
-        <button id="trash-toggle" class="toolbar-btn" title="Recently deleted">🗑</button>
       </div>
       <div id="file-grid"></div>
       <div id="pagination" style="display:none;"></div>
@@ -110,7 +129,21 @@
     <div id="preview-overlay"></div>
     <div id="preview-content">
       <button id="preview-close">&times;</button>
+      <span id="preview-counter"></span>
+      <button id="preview-prev" class="preview-nav" title="Previous">&lsaquo;</button>
+      <button id="preview-next" class="preview-nav" title="Next">&rsaquo;</button>
       <div id="preview-body"></div>
+    </div>
+  </div>
+
+  <div id="confirm-modal" style="display:none;">
+    <div id="confirm-overlay"></div>
+    <div id="confirm-content">
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel-btn">Cancel</button>
+        <button id="confirm-ok-btn">Confirm</button>
+      </div>
     </div>
   </div>
 
