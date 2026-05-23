@@ -5,10 +5,12 @@ const crypto = require('crypto');
 const os = require('os');
 const db = require('../data/database');
 const { buildMetadata, generateThumbnail } = require('../utils/fileHelpers');
+const { initSSE, broadcast } = require('../utils/realtime');
 
 const router = express.Router();
 let uploadDir = 'uploads';
 let thumbDir = '';
+const THUMBNAILS_ENABLED = false;
 
 function setUploadDir(dir) {
   uploadDir = dir;
@@ -38,7 +40,7 @@ function recordToResponse(record) {
     extension: record.extension,
     isImage: record.isImage === 1,
     url: urlPath + record.storedName,
-    thumbnailUrl: record.isImage ? '/uploads/.thumbnails/' + record.storedName : undefined,
+    thumbnailUrl: undefined,
     deviceInfo: record.deviceInfo,
     uploadedAt: record.uploadedAt,
   };
@@ -159,12 +161,14 @@ router.post('/upload', async (req, res) => {
 
   db.insertFile(record);
 
-  if (meta.isImage && meta.size > 10240 && thumbDir) {
+  if (THUMBNAILS_ENABLED && meta.isImage && meta.size > 10240 && thumbDir) {
     const filePath = folderPath
       ? path.resolve(uploadDir, folderPath, storedName)
       : path.resolve(uploadDir, storedName);
     generateThumbnail(filePath, thumbDir).catch(err => console.error('Thumbnail error:', err));
   }
+
+  broadcast('files', { action: 'upload', storedName: record.storedName });
 
   res.status(201).json(recordToResponse(record));
 });
@@ -207,6 +211,7 @@ router.post('/files/batch-delete', (req, res) => {
     deleted.push(storedName);
   }
   res.json({ deleted, notFound });
+  if (deleted.length > 0) broadcast('files', { action: 'batch' });
 });
 
 // Batch soft-delete (move to trash)
@@ -241,6 +246,8 @@ router.post('/files/batch-trash', (req, res) => {
     moved.push(storedName);
   }
   res.json({ moved, notFound });
+  if (moved.length > 0) broadcast('files', { action: 'batch' });
+  if (moved.length > 0) broadcast('trash', { action: 'batch' });
 });
 
 router.get('/files/:id', (req, res) => {
@@ -279,6 +286,8 @@ router.delete('/files/:id', (req, res) => {
   db.deleteFileByStoredName(record.storedName);
   db.insertTrash(trashRecord);
   res.json({ success: true, movedToTrash: true });
+  broadcast('files', { action: 'delete', storedName: record.storedName });
+  broadcast('trash', { action: 'move', storedName: record.storedName });
 });
 
 router.put('/files/:id/rename', (req, res) => {
@@ -292,6 +301,7 @@ router.put('/files/:id/rename', (req, res) => {
   db.renameFile(record.storedName, name);
   record.originalName = name;
   res.json(recordToResponse(record));
+  broadcast('files', { action: 'rename', storedName: record.storedName });
 });
 
 router.put('/folders/rename', (req, res) => {
@@ -313,6 +323,7 @@ router.put('/folders/rename', (req, res) => {
   }
   db.renameFolder(oldPath.replace(/\\/g, '/'), newPath);
   res.json({ success: true, oldPath: oldPath.replace(/\\/g, '/'), newPath });
+  broadcast('files', { action: 'batch' });
 });
 
 router.post('/folders', (req, res) => {
@@ -332,6 +343,7 @@ router.post('/folders', (req, res) => {
   }
   db.createFolder(name, folderPath);
   res.json({ success: true, folderPath });
+  broadcast('files', { action: 'batch' });
 });
 
 // ── Trash endpoints ──
@@ -368,6 +380,8 @@ router.post('/trash/:id/restore', (req, res) => {
   db.insertFile(record);
   db.deleteTrashByStoredName(trashRecord.storedName);
   res.json({ success: true });
+  broadcast('trash', { action: 'delete', storedName: trashRecord.storedName });
+  broadcast('files', { action: 'upload', storedName: record.storedName });
 });
 
 router.delete('/trash/:id', (req, res) => {
@@ -380,6 +394,7 @@ router.delete('/trash/:id', (req, res) => {
   if (thumbPath && fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
   db.deleteTrashByStoredName(trashRecord.storedName);
   res.json({ success: true });
+  broadcast('trash', { action: 'delete', storedName: trashRecord.storedName });
 });
 
 router.delete('/trash', (req, res) => {
@@ -393,6 +408,10 @@ router.delete('/trash', (req, res) => {
   }
   db.deleteAllTrash();
   res.json({ success: true, deleted: items.length });
+  if (items.length > 0) broadcast('trash', { action: 'batch' });
 });
 
 module.exports = { router, setUploadDir };
+router.get('/stream', (req, res) => {
+  initSSE(req, res);
+});

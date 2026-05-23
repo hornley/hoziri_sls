@@ -19,6 +19,10 @@ let longPressTimer = null;
 let allDevices = [];
 let allFolders = [];
 let currentFolder = '';
+let realtimeSource = null;
+let realtimeDebounce = null;
+let pollIntervalId = null;
+let lastScrollY = 0;
 
 function getDeviceSlug() {
   const ua = navigator.userAgent;
@@ -184,6 +188,82 @@ function setupSidebar() {
   });
 }
 
+function setMobileNavActive(action) {
+  const buttons = document.querySelectorAll('.mobile-nav-item');
+  buttons.forEach(btn => btn.classList.remove('active'));
+  const target = document.querySelector(`.mobile-nav-item[data-action="${action}"]`);
+  if (target) target.classList.add('active');
+}
+
+function setupMobileNav() {
+  const nav = document.getElementById('mobile-nav');
+  if (!nav) return;
+
+  const allBtn = document.getElementById('mobile-nav-all');
+  const uploadBtn = document.getElementById('mobile-nav-upload');
+  const trashBtn = document.getElementById('mobile-nav-trash');
+
+  if (allBtn) {
+    allBtn.addEventListener('click', () => {
+      if (currentFolder) { currentFolder = ''; currentPage = 1; }
+      if (showingTrash) hideTrash();
+      document.getElementById('upload-section').style.display = 'none';
+      setMobileNavActive('all');
+      fetchFiles();
+    });
+  }
+
+  if (uploadBtn) {
+    uploadBtn.addEventListener('click', () => {
+      if (showingTrash) hideTrash();
+      const section = document.getElementById('upload-section');
+      const isVisible = section.style.display !== 'none';
+      section.style.display = isVisible ? 'none' : 'block';
+      setMobileNavActive('upload');
+    });
+  }
+
+  if (trashBtn) {
+    trashBtn.addEventListener('click', () => {
+      document.getElementById('upload-section').style.display = 'none';
+      if (showingTrash) {
+        hideTrash();
+        setMobileNavActive('all');
+      } else {
+        showTrash();
+        setMobileNavActive('trash');
+      }
+    });
+  }
+}
+
+function setupMobileNavAutoHide() {
+  const nav = document.getElementById('mobile-nav');
+  const content = document.getElementById('main-content');
+  if (!nav || !content) return;
+
+  lastScrollY = content.scrollTop;
+  let ticking = false;
+
+  function onScroll() {
+    const currentY = content.scrollTop;
+    if (!ticking) {
+      window.requestAnimationFrame(() => {
+        const delta = currentY - lastScrollY;
+        if (Math.abs(delta) > 8) {
+          if (delta > 0) nav.classList.add('hidden');
+          else nav.classList.remove('hidden');
+          lastScrollY = currentY;
+        }
+        ticking = false;
+      });
+      ticking = true;
+    }
+  }
+
+  content.addEventListener('scroll', onScroll, { passive: true });
+}
+
 function setupFolderMode() {
   document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -288,9 +368,8 @@ function renderFileGrid(files) {
   for (const file of files) {
     const isSelected = selectedFiles.has(file.storedName);
     const icon = getFileIcon(file.extension, file.mimeType);
-    const thumbUrl = file.thumbnailUrl || file.url;
     const preview = file.isImage
-      ? `<img class="preview" src="${thumbUrl}" alt="${file.originalName}" loading="lazy" onerror="this.onerror=null;this.src='${file.url}';this.style.objectFit='contain'">`
+      ? `<img class="preview" src="${file.url}" alt="${file.originalName}" loading="lazy" onerror="this.onerror=null;this.style.objectFit='contain'">`
       : (icon ? `<div class="file-icon">${icon}</div>` : `<div class="file-icon">📄</div>`);
     const copyBtn = config.copyLinkEnabled
       ? `<button class="copy-btn" data-url="${file.url}">Copy Link</button>`
@@ -966,6 +1045,7 @@ function hideTrash() {
   document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
   const allFilesBtn = document.getElementById('sidebar-all-files');
   if (allFilesBtn) allFilesBtn.classList.add('active');
+  setMobileNavActive('all');
   fetchFiles();
 }
 
@@ -1300,6 +1380,39 @@ function setupPaste() {
   });
 }
 
+function scheduleRefresh() {
+  clearTimeout(realtimeDebounce);
+  realtimeDebounce = setTimeout(() => {
+    if (showingTrash) showTrash();
+    else fetchFiles();
+    fetchDevices();
+    populateDeviceFilter();
+  }, 300);
+}
+
+function setupRealtime() {
+  if (!window.EventSource) return;
+  realtimeSource = new EventSource('/api/stream');
+
+  realtimeSource.addEventListener('open', () => {
+    if (pollIntervalId) {
+      clearInterval(pollIntervalId);
+      pollIntervalId = null;
+    }
+  });
+
+  realtimeSource.addEventListener('error', () => {
+    if (!pollIntervalId) {
+      pollIntervalId = setInterval(() => {
+        if (!showingTrash) fetchFiles();
+      }, 8000);
+    }
+  });
+
+  realtimeSource.addEventListener('files', scheduleRefresh);
+  realtimeSource.addEventListener('trash', scheduleRefresh);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await fetchConfig();
   setupUpload();
@@ -1309,6 +1422,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupTheme();
   setupFolderMode();
   setupSidebar();
+  setupMobileNav();
+  setupMobileNavAutoHide();
   setupPreviewModal();
   setupTrash();
   setupSettings();
@@ -1323,7 +1438,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await fetchDevices();
   populateDeviceFilter();
   fetchFiles();
-  setInterval(() => {
+  setupRealtime();
+  pollIntervalId = setInterval(() => {
     if (!showingTrash) fetchFiles();
   }, 8000);
 });

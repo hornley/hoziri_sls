@@ -29,7 +29,7 @@ if (!fs.existsSync(trashDir)) fs.mkdirSync(trashDir, { recursive: true });
 
 db.init(DB_PATH);
 
-// Generate missing thumbnails for existing images on startup
+// Generate missing thumbnails for existing images on startup (disabled)
 const sharp = require('sharp');
 function generateMissingThumbnails() {
   const files = db.getAllFiles();
@@ -45,7 +45,7 @@ function generateMissingThumbnails() {
   }
   if (count > 0) console.log(`Generating ${count} missing thumbnail(s)...`);
 }
-generateMissingThumbnails();
+// generateMissingThumbnails();
 
 function autoPurgeTrash() {
   const trashDays = parseInt(db.getConfig('trashDays'), 10) || 30;
