@@ -115,10 +115,14 @@ router.get('/network-info', (req, res) => {
 });
 
 router.get('/files', (req, res) => {
-  const { page, limit, search, sort, device } = req.query;
-  const result = db.getFilesFiltered({ page, limit, search, sort, device });
+  const { page, limit, search, sort, device, folder } = req.query;
+  const result = db.getFilesFiltered({ page, limit, search, sort, device, folder });
   result.files = result.files.map(recordToResponse);
   res.json(result);
+});
+
+router.get('/files/folders', (req, res) => {
+  res.json({ folders: db.getAllFolders() });
 });
 
 router.get('/files/devices', (req, res) => {
