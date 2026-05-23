@@ -52,6 +52,7 @@ function recordToTrashResponse(record) {
       : record.size >= 1024
         ? (record.size / 1024).toFixed(1) + ' KB'
         : record.size + ' B';
+  const folderPath = record.folderPath || '';
   return {
     id: record.id,
     originalName: record.originalName,
@@ -59,8 +60,12 @@ function recordToTrashResponse(record) {
     size: record.size,
     sizeFormatted,
     mimeType: record.mimeType,
+    extension: record.extension,
+    isImage: record.isImage === 1,
+    folderPath,
     deviceInfo: record.deviceInfo,
     deletedAt: record.deletedAt,
+    url: '/uploads/_trash/' + record.storedName,
   };
 }
 
@@ -308,6 +313,25 @@ router.put('/folders/rename', (req, res) => {
   }
   db.renameFolder(oldPath.replace(/\\/g, '/'), newPath);
   res.json({ success: true, oldPath: oldPath.replace(/\\/g, '/'), newPath });
+});
+
+router.post('/folders', (req, res) => {
+  let { name } = req.body;
+  if (!name || typeof name !== 'string') return res.status(400).json({ error: 'Name is required' });
+  name = name.trim().replace(/[/\\]/g, '');
+  if (!name) return res.status(400).json({ error: 'Invalid folder name' });
+  if (name === '.' || name === '..') return res.status(400).json({ error: 'Invalid folder name' });
+  if (name.length > 255) return res.status(400).json({ error: 'Name too long' });
+  const folderPath = name;
+  const dir = path.join(uploadDir, folderPath);
+  if (fs.existsSync(dir)) return res.status(409).json({ error: 'Folder already exists' });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    return res.status(500).json({ error: 'Failed to create folder' });
+  }
+  db.createFolder(name, folderPath);
+  res.json({ success: true, folderPath });
 });
 
 // ── Trash endpoints ──

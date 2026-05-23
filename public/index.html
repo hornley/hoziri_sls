@@ -4,158 +4,181 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Hoziri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,600;0,6..96,700;1,6..96,400;1,6..96,500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <header>
-    <div class="header-left">
-      <button id="hamburger-btn" class="icon-btn" title="Menu">☰</button>
+    <div class="header-brand">
+      <span class="logo">Hoziri</span>
+      <span class="logo-sub">file share</span>
     </div>
     <div class="header-center">
-      <h1>Hoziri</h1>
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input type="text" id="search-input" placeholder="Search files..." />
+      </div>
     </div>
-    <div class="header-right">
-      <button id="settings-toggle" class="icon-btn" title="Settings">⚙️</button>
-      <button id="qr-toggle" class="icon-btn" title="Show QR code">📱</button>
-      <button id="theme-toggle" class="icon-btn" title="Toggle dark mode">🌙</button>
+    <div class="header-actions">
+      <button id="settings-toggle" class="header-btn" title="Settings">⚙</button>
+      <button id="qr-toggle" class="header-btn" title="QR code">⊞</button>
+      <button id="theme-toggle" class="header-btn" title="Theme">◐</button>
     </div>
   </header>
 
-  <div id="drawer-overlay"></div>
-  <div id="side-drawer">
-    <div class="drawer-header">
-      <span class="drawer-title">Menu</span>
-      <button id="drawer-close">&times;</button>
-    </div>
-    <div class="drawer-body">
-      <div id="drawer-stats" class="drawer-item drawer-stats"></div>
-      <div class="drawer-divider"></div>
-      <button id="drawer-qr" class="drawer-item">📱 Show QR code</button>
-      <button id="drawer-theme" class="drawer-item">🌙 Dark mode</button>
-      <div class="drawer-divider"></div>
-      <button id="drawer-files" class="drawer-item">📁 Files</button>
-      <button id="drawer-trash" class="drawer-item">🗑 Trash</button>
-      <button id="drawer-settings" class="drawer-item">⚙️ Settings</button>
+  <div class="app-body">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Navigate</div>
+        <button class="sidebar-item" id="sidebar-upload" data-action="upload">
+          <span class="si-icon">↑</span>
+          <span>Upload</span>
+        </button>
+        <button class="sidebar-item active" id="sidebar-all-files" data-action="all">
+          <span class="si-icon">◈</span>
+          <span>All Files</span>
+        </button>
+        <button class="sidebar-item" id="sidebar-trash" data-action="trash">
+          <span class="si-icon">⎔</span>
+          <span>Trash</span>
+        </button>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section" id="folders-section">
+        <div class="sidebar-label">Folders</div>
+        <div id="folder-tree" class="folder-tree"></div>
+      </div>
+
+      <div class="sidebar-spacer"></div>
+
+      <div class="sidebar-footer">
+        <span id="sidebar-stats">0 files</span>
+      </div>
+    </aside>
+
+    <main class="content" id="main-content">
+      <div id="toolbar">
+        <div id="breadcrumb" class="breadcrumb"></div>
+        <div class="toolbar-right">
+          <select id="sort-select" class="toolbar-select">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="name-asc">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="smallest">Smallest</option>
+            <option value="largest">Largest</option>
+          </select>
+          <select id="device-filter" class="toolbar-select">
+            <option value="">All devices</option>
+          </select>
+          <span id="file-stats" class="toolbar-stats"></span>
+        </div>
+      </div>
+
+      <div class="upload-area" id="upload-section" style="display:none;">
+        <form id="upload-form">
+          <div id="upload-mode-toggle">
+            <button type="button" class="mode-btn" data-mode="files">Files</button>
+            <button type="button" class="mode-btn" data-mode="folder">Folder</button>
+          </div>
+          <div id="drop-zone">
+            <p>Drop files here</p>
+            <p class="drop-hint">or click to browse · Ctrl+V for screenshots</p>
+            <input type="file" id="file-input" name="file" multiple>
+          </div>
+          <div id="pending-section" style="display:none;">
+            <div id="pending-list"></div>
+            <div id="pending-summary"></div>
+          </div>
+          <button type="submit" id="upload-btn">Upload</button>
+        </form>
+        <div id="progress-container" style="display:none;">
+          <progress id="progress-bar" value="0" max="100"></progress>
+          <span id="progress-text">0%</span>
+        </div>
+      </div>
+
+      <div id="file-grid" class="file-grid"></div>
+      <div id="pagination" class="pagination" style="display:none;"></div>
+
+      <div id="trash-section" style="display:none;">
+        <div class="trash-header">
+          <span id="trash-count">Trash</span>
+          <button id="trash-empty-btn" class="btn-danger">Empty trash</button>
+        </div>
+        <div id="trash-list"></div>
+      </div>
+    </main>
+  </div>
+
+  <div id="multi-toolbar">
+    <span id="multi-count">0 selected</span>
+    <button id="multi-download-btn">⬇ Download</button>
+    <button id="multi-delete-btn">⎔ Trash</button>
+    <button id="multi-cancel-btn">Cancel</button>
+  </div>
+
+  <div id="context-menu"></div>
+
+  <div id="preview-modal">
+    <div id="preview-overlay"></div>
+    <div id="preview-content">
+      <button id="preview-close" class="modal-close">&times;</button>
+      <span id="preview-counter"></span>
+      <button id="preview-prev" class="preview-nav" title="Previous">‹</button>
+      <button id="preview-next" class="preview-nav" title="Next">›</button>
+      <div id="preview-body"></div>
     </div>
   </div>
 
-  <div id="qr-modal" style="display:none;">
-    <div id="qr-overlay"></div>
-    <div id="qr-content">
-      <button id="qr-close">&times;</button>
-      <h2>Scan to connect</h2>
-      <div id="qr-code"></div>
-      <p id="qr-url"></p>
+  <div id="confirm-modal">
+    <div id="confirm-overlay"></div>
+    <div id="confirm-content">
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="confirm-ok-btn" class="btn-danger">Confirm</button>
+      </div>
     </div>
   </div>
 
-  <div id="settings-modal" style="display:none;">
+  <div id="rename-modal">
+    <div id="rename-overlay"></div>
+    <div class="rename-content">
+      <h3><span id="rename-title">Rename</span></h3>
+      <input id="rename-input" type="text" />
+      <div class="rename-actions">
+        <button id="rename-cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="rename-save-btn" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-modal">
     <div id="settings-overlay"></div>
     <div id="settings-content">
-      <button id="settings-close">&times;</button>
+      <button id="settings-close" class="modal-close">&times;</button>
       <h2>Settings</h2>
       <div class="settings-field">
         <label for="settings-trash-days">Trash retention (days)</label>
         <input type="number" id="settings-trash-days" min="1" max="365" value="30">
       </div>
-      <button id="settings-save">Save</button>
+      <button id="settings-save" class="btn-primary">Save</button>
     </div>
   </div>
 
-  <main>
-    <section id="upload-section">
-      <form id="upload-form">
-        <div id="upload-mode-toggle">
-          <button type="button" class="mode-btn active" data-mode="files">Files</button>
-          <button type="button" class="mode-btn" data-mode="folder">Folder</button>
-        </div>
-        <div id="drop-zone">
-          <p>Drag & drop files here or click to browse</p>
-          <p class="drop-hint">Or press Ctrl+V to paste screenshots</p>
-          <input type="file" id="file-input" name="file" multiple>
-        </div>
-        <div id="pending-section" style="display:none;">
-          <div id="pending-list"></div>
-          <div id="pending-summary"></div>
-        </div>
-        <button type="submit" id="upload-btn">Upload</button>
-      </form>
-      <div id="progress-container" style="display:none;">
-        <progress id="progress-bar" value="0" max="100"></progress>
-        <span id="progress-text">0%</span>
-      </div>
-    </section>
-
-    <section id="files-section">
-      <h2>Uploaded Files</h2>
-      <div id="toolbar">
-        <span id="file-stats" class="toolbar-stats"></span>
-        <input type="text" id="search-input" placeholder="Search files..." class="toolbar-search">
-        <select id="sort-select" class="toolbar-select">
-          <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-          <option value="name-asc">Name A-Z</option>
-          <option value="name-desc">Name Z-A</option>
-          <option value="smallest">Smallest</option>
-          <option value="largest">Largest</option>
-        </select>
-        <select id="device-filter" class="toolbar-select">
-          <option value="">All devices</option>
-        </select>
-      </div>
-      <div id="file-grid"></div>
-      <div id="pagination" style="display:none;"></div>
-      <div id="trash-section" style="display:none;">
-        <div id="trash-header">
-          <span id="trash-count">Recently deleted</span>
-          <button id="trash-empty-btn">Empty trash</button>
-        </div>
-        <div id="trash-list"></div>
-      </div>
-    </section>
-  </main>
-
-  <div id="multi-toolbar" style="display:none;">
-    <span id="multi-count">0 selected</span>
-    <button id="multi-download-btn">Download</button>
-    <button id="multi-delete-btn">Move to Trash</button>
-    <button id="multi-cancel-btn">Cancel</button>
-  </div>
-
-  <div id="context-menu" style="display:none;"></div>
-
-  <div id="preview-modal" style="display:none;">
-    <div id="preview-overlay"></div>
-    <div id="preview-content">
-      <button id="preview-close">&times;</button>
-      <span id="preview-counter"></span>
-      <button id="preview-prev" class="preview-nav" title="Previous">&lsaquo;</button>
-      <button id="preview-next" class="preview-nav" title="Next">&rsaquo;</button>
-      <div id="preview-body"></div>
-    </div>
-  </div>
-
-  <div id="confirm-modal" style="display:none;">
-    <div id="confirm-overlay"></div>
-    <div id="confirm-content">
-      <p id="confirm-message"></p>
-      <div class="confirm-actions">
-        <button id="confirm-cancel-btn">Cancel</button>
-        <button id="confirm-ok-btn">Confirm</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="rename-modal" style="display:none;">
-    <div id="rename-overlay"></div>
-    <div class="rename-content">
-      <h3><span id="rename-title">Rename file</span></h3>
-      <input id="rename-input" type="text" />
-      <div class="rename-actions">
-        <button id="rename-cancel-btn">Cancel</button>
-        <button id="rename-save-btn">Rename</button>
-      </div>
+  <div id="qr-modal">
+    <div id="qr-overlay"></div>
+    <div id="qr-content">
+      <button id="qr-close" class="modal-close">&times;</button>
+      <h2>Scan to connect</h2>
+      <div id="qr-code"></div>
+      <p id="qr-url"></p>
     </div>
   </div>
 

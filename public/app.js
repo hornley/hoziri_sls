@@ -140,70 +140,48 @@ function setupTheme() {
   });
 }
 
-function setupHamburger() {
-  const drawer = document.getElementById('side-drawer');
-  const overlay = document.getElementById('drawer-overlay');
+function setupSidebar() {
+  const allFilesBtn = document.getElementById('sidebar-all-files');
+  const trashBtn = document.getElementById('sidebar-trash');
+  const uploadBtn = document.getElementById('sidebar-upload');
 
-  function openDrawer() {
-    drawer.classList.add('open');
-    overlay.classList.add('open');
-    document.body.style.overflow = 'hidden';
-    // Update stats
-    const total = filesState.total;
-    const totalSize = filesState.files.reduce((s, f) => s + f.size, 0);
-    document.getElementById('drawer-stats').textContent = total + ' file' + (total !== 1 ? 's' : '') + ' · ' + formatSize(totalSize);
+  function clearActive() {
+    document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
   }
 
-  function closeDrawer() {
-    drawer.classList.remove('open');
-    overlay.classList.remove('open');
-    document.body.style.overflow = '';
+  function hideUpload() {
+    document.getElementById('upload-section').style.display = 'none';
   }
 
-  document.getElementById('hamburger-btn').addEventListener('click', openDrawer);
-  document.getElementById('drawer-close').addEventListener('click', closeDrawer);
-  overlay.addEventListener('click', closeDrawer);
-
-  // Hide QR from drawer if on mobile (matching header behavior)
-  if (document.getElementById('qr-toggle').style.display === 'none') {
-    document.getElementById('drawer-qr').style.display = 'none';
-  }
-
-  // Wire drawer items
-  document.getElementById('drawer-theme').addEventListener('click', () => {
-    document.getElementById('theme-toggle').click();
-    closeDrawer();
-  });
-  document.getElementById('drawer-qr').addEventListener('click', () => {
-    document.getElementById('qr-toggle').click();
-    closeDrawer();
-  });
-  document.getElementById('drawer-files').addEventListener('click', () => {
-    closeDrawer();
-    if (currentFolder) { currentFolder = ''; currentPage = 1; fetchFiles(); }
+  allFilesBtn.addEventListener('click', () => {
+    clearActive();
+    allFilesBtn.classList.add('active');
+    hideUpload();
+    if (currentFolder) { currentFolder = ''; currentPage = 1; }
     if (showingTrash) hideTrash();
+    else fetchFiles();
   });
-  document.getElementById('drawer-trash').addEventListener('click', () => {
-    closeDrawer();
+
+  trashBtn.addEventListener('click', () => {
+    hideUpload();
+    clearActive();
+    trashBtn.classList.add('active');
+    if (showingTrash) {
+      hideTrash();
+      allFilesBtn.classList.add('active');
+    } else {
+      showTrash();
+    }
+  });
+
+  uploadBtn.addEventListener('click', () => {
+    const section = document.getElementById('upload-section');
+    const isVisible = section.style.display !== 'none';
     if (showingTrash) hideTrash();
-    else showTrash();
+    clearActive();
+    uploadBtn.classList.add('active');
+    section.style.display = isVisible ? 'none' : 'block';
   });
-  document.getElementById('drawer-settings').addEventListener('click', () => {
-    document.getElementById('settings-toggle').click();
-    closeDrawer();
-  });
-
-  // Close drawer on Escape
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer();
-  });
-
-  // Update drawer theme label when theme changes
-  const themeObserver = new MutationObserver(() => {
-    const isDark = document.documentElement.dataset.theme === 'dark';
-    document.getElementById('drawer-theme').textContent = isDark ? '☀️ Light mode' : '🌙 Dark mode';
-  });
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 }
 
 function setupFolderMode() {
@@ -259,24 +237,21 @@ async function fetchFiles() {
     const params = getQueryParams();
     const [filesRes, foldersRes] = await Promise.all([
       fetch('/api/files?' + params.toString()),
-      currentFolder ? Promise.resolve({ json: () => ({ folders: [] }) }) : fetch('/api/files/folders')
+      fetch('/api/files/folders')
     ]);
     filesState = await filesRes.json();
-    if (!currentFolder) {
-      const foldersData = await foldersRes.json();
-      allFolders = foldersData.folders || [];
-    }
+    const foldersData = await foldersRes.json();
+    allFolders = foldersData.folders || [];
     const totalSize = filesState.files.reduce((s, f) => s + f.size, 0);
     const total = filesState.total;
     const stats = document.getElementById('file-stats');
+    const sidebarStats = document.getElementById('sidebar-stats');
     stats.textContent = total + ' file' + (total !== 1 ? 's' : '') + ' · ' + formatSize(totalSize);
-    // Update drawer stats if drawer is open
-    if (document.getElementById('side-drawer').classList.contains('open')) {
-      document.getElementById('drawer-stats').textContent = total + ' file' + (total !== 1 ? 's' : '') + ' · ' + formatSize(totalSize);
-    }
+    if (sidebarStats) sidebarStats.textContent = total + ' file' + (total !== 1 ? 's' : '') + ' · ' + formatSize(totalSize);
     if (!showingTrash) {
       renderFileGrid(filesState.files);
       renderPagination();
+      renderFolderTree();
     }
   } catch { showToast('Failed to load files', 'error'); }
 }
@@ -411,12 +386,24 @@ function renderFileGrid(files) {
   const backBtn = grid.querySelector('.folder-back-btn');
   if (backBtn) {
     backBtn.addEventListener('click', () => {
+      document.getElementById('upload-section').style.display = 'none';
       currentFolder = '';
       currentPage = 1;
       exitMultiSelect();
+      document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+      const allFilesBtn = document.getElementById('sidebar-all-files');
+      if (allFilesBtn) allFilesBtn.classList.add('active');
       fetchFiles();
     });
   }
+
+  // Empty area context menu
+  grid.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.file-card, .folder-breadcrumb')) return;
+    e.preventDefault();
+    hideContextMenu();
+    showContextMenu(e.clientX, e.clientY, { type: 'empty' });
+  });
 }
 
 function renderPagination() {
@@ -462,6 +449,39 @@ function goToPage(page) {
   if (page < 1 || page > filesState.totalPages) return;
   currentPage = page;
   fetchFiles();
+}
+
+function renderFolderTree() {
+  const container = document.getElementById('folder-tree');
+
+  container.innerHTML = allFolders.map(folder => `
+    <button class="folder-item${currentFolder === folder ? ' active' : ''}" data-folder="${escapeHtml(folder)}">
+      <span class="fi-icon">📁</span>
+      <span>${escapeHtml(folder)}</span>
+    </button>
+  `).join('');
+
+  if (allFolders.length === 0 && !currentFolder) {
+    container.innerHTML = '<div style="padding:8px 10px;font-size:11px;color:var(--text-muted)">No folders yet</div>';
+  }
+
+  container.querySelectorAll('.folder-item').forEach(item => {
+    item.addEventListener('click', () => {
+      if (showingTrash) hideTrash();
+      document.getElementById('upload-section').style.display = 'none';
+      currentFolder = item.dataset.folder;
+      currentPage = 1;
+      exitMultiSelect();
+      document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+      fetchFiles();
+    });
+
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      hideContextMenu();
+      showContextMenu(e.clientX, e.clientY, { type: 'folder', folderPath: item.dataset.folder });
+    });
+  });
 }
 
 // Multi-select
@@ -577,6 +597,13 @@ function showContextMenu(x, y, ctx) {
       <div class="ctx-divider"></div>
       <button class="ctx-item" data-action="cancel">✕ Cancel</button>
     `;
+  } else if (ctx.type === 'empty') {
+    items = `
+      <button class="ctx-item" data-action="create-folder">📁 Create new folder</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item" data-action="upload-files">⬆ Upload file/s</button>
+      <button class="ctx-item" data-action="upload-folders">⬆ Upload folder/s</button>
+    `;
   }
 
   menu.innerHTML = items;
@@ -664,6 +691,30 @@ function showContextMenu(x, y, ctx) {
         if (file) openRenameModal({ type: 'file', file });
         else if (isFolder) openRenameModal({ type: 'folder', folderPath: ctx.folderPath });
         else showToast('Coming soon', 'info');
+      } else if (action === 'create-folder') {
+        openCreateFolderModal();
+      } else if (action === 'upload-files') {
+        document.getElementById('upload-section').style.display = 'block';
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.mode-btn[data-mode="files"]').classList.add('active');
+        uploadMode = 'files';
+        const input = document.getElementById('file-input');
+        input.removeAttribute('webkitdirectory');
+        input.removeAttribute('directory');
+        input.setAttribute('multiple', '');
+        input.value = '';
+        input.click();
+      } else if (action === 'upload-folders') {
+        document.getElementById('upload-section').style.display = 'block';
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.mode-btn[data-mode="folder"]').classList.add('active');
+        uploadMode = 'folder';
+        const input = document.getElementById('file-input');
+        input.removeAttribute('multiple');
+        input.setAttribute('webkitdirectory', '');
+        input.setAttribute('directory', '');
+        input.value = '';
+        input.click();
       } else if (action === 'cancel') {
         // just close
       } else if (item.classList.contains('ctx-placeholder')) {
@@ -773,9 +824,13 @@ function openPreview(file) {
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 
-  // Build slideshow image list from current page
-  previewImages = filesState.files.filter(f => f.isImage);
-  previewIndex = previewImages.findIndex(f => f.storedName === file.storedName);
+  if (showingTrash) {
+    previewImages = [];
+    previewIndex = -1;
+  } else {
+    previewImages = filesState.files.filter(f => f.isImage);
+    previewIndex = previewImages.findIndex(f => f.storedName === file.storedName);
+  }
 
   renderPreview(file);
   updateSlideshowNav();
@@ -833,39 +888,51 @@ function closePreview() {
 // ── Trash ──
 async function showTrash() {
   showingTrash = true;
-  document.getElementById('file-grid').style.display = 'none';
   document.getElementById('pagination').style.display = 'none';
-  const section = document.getElementById('trash-section');
-  section.style.display = 'block';
+  document.getElementById('upload-section').style.display = 'none';
+  document.getElementById('trash-section').style.display = 'block';
+  document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+  const trashSidebarBtn = document.getElementById('sidebar-trash');
+  if (trashSidebarBtn) trashSidebarBtn.classList.add('active');
   try {
     const res = await fetch('/api/trash');
     const items = await res.json();
-    const list = document.getElementById('trash-list');
+    const grid = document.getElementById('file-grid');
     document.getElementById('trash-count').textContent = items.length + ' file' + (items.length !== 1 ? 's' : '') + ' in trash';
+    grid.style.display = 'grid';
     if (items.length === 0) {
-      list.innerHTML = '<div class="empty-state">Trash is empty</div>';
+      grid.innerHTML = '<div class="empty-state">Trash is empty</div>';
       return;
     }
-    list.innerHTML = items.map(item => `
-      <div class="trash-item">
-        <span class="ti-name">${escapeHtml(item.originalName)}</span>
-        <span class="ti-meta">${item.sizeFormatted} · ${item.deviceInfo}</span>
-        <div class="ti-actions">
-          <button class="restore-btn" data-stored="${escapeHtml(item.storedName)}">Restore</button>
-          <button class="perm-delete-btn" data-stored="${escapeHtml(item.storedName)}">Delete</button>
+    grid.innerHTML = items.map(item => {
+      const icon = getFileIcon(item.extension, item.mimeType);
+      const preview = item.isImage
+        ? `<img class="preview" src="${item.url}" alt="${item.originalName}" loading="lazy">`
+        : (icon ? `<div class="file-icon">${icon}</div>` : `<div class="file-icon">📄</div>`);
+      return `
+        <div class="file-card trash-card" data-stored="${escapeHtml(item.storedName)}">
+          ${preview}
+          <div class="file-name">${escapeHtml(item.originalName)}</div>
+          <div class="file-meta">${item.sizeFormatted} &middot; ${item.deviceInfo}</div>
+          <div class="file-actions trash-actions">
+            <button class="restore-btn" data-stored="${escapeHtml(item.storedName)}">Restore</button>
+            <button class="perm-delete-btn" data-stored="${escapeHtml(item.storedName)}">Delete</button>
+          </div>
         </div>
-      </div>
-    `).join('');
-    list.querySelectorAll('.restore-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      `;
+    }).join('');
+    grid.querySelectorAll('.restore-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         await fetch('/api/trash/' + btn.dataset.stored + '/restore', { method: 'POST' });
         showToast('File restored', 'success');
         showTrash();
         fetchFiles();
       });
     });
-    list.querySelectorAll('.perm-delete-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
+    grid.querySelectorAll('.perm-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         const stored = btn.dataset.stored;
         showConfirmModal('Permanently delete this file?', async () => {
           await fetch('/api/trash/' + stored, { method: 'DELETE' });
@@ -874,6 +941,21 @@ async function showTrash() {
         });
       });
     });
+    // Click on trash card to open preview
+    grid.querySelectorAll('.trash-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const stored = card.dataset.stored;
+        const item = items.find(f => f.storedName === stored);
+        if (item) openPreview(item);
+      });
+    });
+    // Empty area context menu in trash
+    grid.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('.trash-card')) return;
+      e.preventDefault();
+      hideContextMenu();
+      showContextMenu(e.clientX, e.clientY, { type: 'empty' });
+    });
   } catch { showToast('Failed to load trash', 'error'); }
 }
 
@@ -881,6 +963,9 @@ function hideTrash() {
   showingTrash = false;
   document.getElementById('trash-section').style.display = 'none';
   document.getElementById('file-grid').style.display = '';
+  document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+  const allFilesBtn = document.getElementById('sidebar-all-files');
+  if (allFilesBtn) allFilesBtn.classList.add('active');
   fetchFiles();
 }
 
@@ -966,6 +1051,16 @@ function openRenameModal(ctx) {
   input.select();
 }
 
+function openCreateFolderModal() {
+  document.getElementById('rename-title').textContent = 'Create new folder';
+  document.getElementById('rename-input').value = '';
+  document.getElementById('rename-input').placeholder = 'Folder name';
+  renameContext = { type: 'create-folder' };
+  document.getElementById('rename-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  document.getElementById('rename-input').focus();
+}
+
 function closeRenameModal() {
   renameContext = null;
   document.getElementById('rename-modal').style.display = 'none';
@@ -979,7 +1074,18 @@ function setupRenameModal() {
     if (!name) { showToast('Name cannot be empty', 'error'); return; }
     try {
       let res;
-      if (renameContext.type === 'file') {
+      if (renameContext.type === 'create-folder') {
+        res = await fetch('/api/folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        if (!res.ok) { showToast('Failed to create folder', 'error'); return; }
+        showToast('Folder created', 'success');
+        closeRenameModal();
+        fetchFiles();
+        return;
+      } else if (renameContext.type === 'file') {
         name = name + (renameContext.extension || '');
         res = await fetch('/api/files/' + renameContext.storedName + '/rename', {
           method: 'PUT',
@@ -1202,7 +1308,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupQR();
   setupTheme();
   setupFolderMode();
-  setupHamburger();
+  setupSidebar();
   setupPreviewModal();
   setupTrash();
   setupSettings();

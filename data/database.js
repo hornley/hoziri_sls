@@ -36,6 +36,14 @@ function init(dbPath) {
     )
   `);
   db.exec(`
+    CREATE TABLE IF NOT EXISTS folders (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      folderPath  TEXT NOT NULL UNIQUE,
+      createdAt   TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(`
     CREATE TABLE IF NOT EXISTS config (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -140,7 +148,15 @@ function getFilesFiltered({ page = 1, limit = 50, search = '', sort = 'newest', 
 }
 
 function getAllFolders() {
-  return db.prepare("SELECT DISTINCT folderPath FROM files WHERE folderPath != '' AND folderPath IS NOT NULL ORDER BY folderPath").all().map(r => r.folderPath);
+  return db.prepare("SELECT DISTINCT folderPath FROM files WHERE folderPath != '' AND folderPath IS NOT NULL UNION SELECT folderPath FROM folders ORDER BY folderPath").all().map(r => r.folderPath);
+}
+
+function createFolder(name, folderPath) {
+  db.prepare('INSERT INTO folders (name, folderPath) VALUES (?, ?)').run(name, folderPath);
+}
+
+function deleteFolder(folderPath) {
+  db.prepare('DELETE FROM folders WHERE folderPath = ?').run(folderPath);
 }
 
 function renameFolder(oldPath, newPath) {
@@ -212,4 +228,4 @@ function close() {
   if (db) db.close();
 }
 
-module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getAllFolders, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
+module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getAllFolders, createFolder, deleteFolder, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
