@@ -65,6 +65,8 @@
       <div id="toolbar">
         <div id="breadcrumb" class="breadcrumb"></div>
         <div class="toolbar-right">
+          <button id="filters-toggle" class="toolbar-btn" title="Filters">⧉ Filters</button>
+          <div id="filter-chips" class="filter-chips"></div>
           <select id="sort-select" class="toolbar-select">
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
@@ -194,6 +196,91 @@
       <h2>Scan to connect</h2>
       <div id="qr-code"></div>
       <p id="qr-url"></p>
+    </div>
+  </div>
+
+  <div id="filters-modal">
+    <div id="filters-overlay"></div>
+    <div class="filters-content">
+      <div class="filters-header">
+        <div>
+          <h2>Filters</h2>
+          <p>Refine what shows in this folder.</p>
+        </div>
+        <button id="filters-close" class="modal-close">&times;</button>
+      </div>
+
+      <div class="filters-section">
+        <div class="filters-title">Date</div>
+        <div class="filters-row">
+          <label class="filters-radio">
+            <input type="radio" name="date-source" value="uploaded" checked>
+            <span>Uploaded</span>
+          </label>
+          <label class="filters-radio">
+            <input type="radio" name="date-source" value="metadata">
+            <span>Metadata</span>
+          </label>
+        </div>
+        <div class="filters-row filters-pills">
+          <button class="filters-pill" type="button" data-preset="today">Today</button>
+          <button class="filters-pill" type="button" data-preset="last7">Last 7 days</button>
+          <button class="filters-pill" type="button" data-preset="last30">Last 30 days</button>
+          <button class="filters-pill" type="button" data-preset="thisyear">This year</button>
+        </div>
+        <div class="filters-grid">
+          <label class="filters-field">
+            <span>From</span>
+            <input type="date" id="filter-date-from">
+          </label>
+          <label class="filters-field">
+            <span>To</span>
+            <input type="date" id="filter-date-to">
+          </label>
+        </div>
+      </div>
+
+      <div class="filters-section">
+        <div class="filters-title">Metadata</div>
+        <div class="filters-grid">
+          <label class="filters-field">
+            <span>Location</span>
+            <select id="filter-location">
+              <option value="">Any location</option>
+            </select>
+          </label>
+          <label class="filters-field">
+            <span>Camera</span>
+            <select id="filter-camera">
+              <option value="">Any camera</option>
+            </select>
+          </label>
+        </div>
+        <label class="filters-field">
+          <span>Tags</span>
+          <input type="text" id="filter-tags" list="filter-tags-list" placeholder="Comma separated or unknown">
+          <datalist id="filter-tags-list"></datalist>
+        </label>
+      </div>
+
+      <div class="filters-section">
+        <div class="filters-title">File type</div>
+        <div class="filters-row" id="filter-filetypes"></div>
+      </div>
+
+      <div class="filters-section">
+        <div class="filters-title">File extension</div>
+        <div class="filters-row filters-pills" id="filter-extensions"></div>
+        <label class="filters-field">
+          <span>Custom extensions</span>
+          <input type="text" id="filter-extension-custom" placeholder="e.g. .mov, .heic">
+        </label>
+      </div>
+
+      <div class="filters-actions">
+        <button class="btn-secondary" type="button" id="filter-clear-btn">Clear</button>
+        <button class="btn-primary" type="button" id="filter-apply-btn">Apply filters</button>
+      </div>
     </div>
   </div>
 

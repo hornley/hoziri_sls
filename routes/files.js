@@ -122,10 +122,79 @@ router.get('/network-info', (req, res) => {
 });
 
 router.get('/files', (req, res) => {
-  const { page, limit, search, sort, device, folder } = req.query;
-  const result = db.getFilesFiltered({ page, limit, search, sort, device, folder });
+  const {
+    page,
+    limit,
+    search,
+    sort,
+    device,
+    folder,
+    dateSource,
+    dateFrom,
+    dateTo,
+    metaLocation,
+    metaCamera,
+    tags,
+    fileType,
+    fileExtension,
+  } = req.query;
+  const normalizeDateParam = (value, boundary) => {
+    if (value === undefined || value === null) return undefined;
+    const trimmed = String(value).trim();
+    if (!trimmed) return undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split('-').map(Number);
+      const date = boundary === 'end'
+        ? new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999))
+        : new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+      return date.toISOString();
+    }
+    const parsed = Date.parse(trimmed);
+    if (Number.isNaN(parsed)) return 'INVALID';
+    return new Date(parsed).toISOString();
+  };
+
+  const normalizedDateFrom = normalizeDateParam(dateFrom, 'start');
+  const normalizedDateTo = normalizeDateParam(dateTo, 'end');
+  if (normalizedDateFrom === 'INVALID' || normalizedDateTo === 'INVALID') {
+    return res.status(400).json({ error: 'Invalid date range' });
+  }
+  const hasDateFrom = normalizedDateFrom !== undefined;
+  const hasDateTo = normalizedDateTo !== undefined;
+  const parsedDateFrom = hasDateFrom ? Date.parse(normalizedDateFrom) : null;
+  const parsedDateTo = hasDateTo ? Date.parse(normalizedDateTo) : null;
+  if (hasDateFrom && hasDateTo && parsedDateFrom > parsedDateTo) {
+    return res.status(400).json({ error: 'Invalid date range' });
+  }
+  const result = db.getFilesFiltered({
+    page,
+    limit,
+    search,
+    sort,
+    device,
+    folder,
+    dateSource,
+    dateFrom: normalizedDateFrom,
+    dateTo: normalizedDateTo,
+    metaLocation,
+    metaCamera,
+    tags,
+    fileType,
+    fileExtension,
+  });
   result.files = result.files.map(recordToResponse);
   res.json(result);
+});
+
+router.get('/files/metadata-options', (req, res) => {
+  res.json({
+    dateSources: db.getAllDateSources(),
+    locations: db.getAllMetaLocations(),
+    cameras: db.getAllMetaCameras(),
+    tags: db.getAllTags(),
+    fileTypes: db.getAllFileTypes(),
+    fileExtensions: db.getAllFileExtensions(),
+  });
 });
 
 router.get('/files/folders', (req, res) => {
@@ -144,7 +213,12 @@ router.post('/upload', async (req, res) => {
   const folderPath = req.body.folderPath || '';
   const urlPath = folderPath ? '/uploads/' + folderPath + '/' : '/uploads/';
 
-  const meta = buildMetadata(req.file, deviceInfo, storedName, urlPath);
+  const filePath = req.file.path
+    ? path.resolve(req.file.path)
+    : folderPath
+      ? path.resolve(uploadDir, folderPath, storedName)
+      : path.resolve(uploadDir, storedName);
+  const meta = await buildMetadata(req.file, deviceInfo, storedName, urlPath, filePath);
 
   const record = {
     id: crypto.randomUUID(),
@@ -156,6 +230,12 @@ router.post('/upload', async (req, res) => {
     isImage: meta.isImage ? 1 : 0,
     deviceInfo: meta.deviceInfo,
     folderPath,
+    metadataDate: meta.metadataDate,
+    metadataLocation: meta.metadataLocation,
+    metadataCamera: meta.metadataCamera,
+    tags: meta.tags,
+    fileType: meta.fileType,
+    fileExtension: meta.fileExtension,
     uploadedAt: new Date().toISOString(),
   };
 

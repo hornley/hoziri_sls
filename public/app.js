@@ -11,6 +11,28 @@ let currentDevice = '';
 let currentPage = 1;
 let searchDebounceTimer = null;
 
+// Filters state
+let filterDraft = null;
+let filterState = {
+  dateSource: 'uploaded',
+  dateFrom: '',
+  dateTo: '',
+  metaLocation: '',
+  metaCamera: '',
+  tags: '',
+  fileType: '',
+  fileExtension: '',
+};
+
+let metadataOptions = {
+  dateSources: [],
+  locations: [],
+  cameras: [],
+  tags: [],
+  fileTypes: [],
+  fileExtensions: [],
+};
+
 // Multi-select state
 let selectedFiles = new Set();
 let multiSelectActive = false;
@@ -309,6 +331,14 @@ function getQueryParams() {
   params.set('sort', currentSort);
   if (currentDevice) params.set('device', currentDevice);
   if (currentFolder) params.set('folder', currentFolder);
+  if (filterState.dateSource && filterState.dateSource !== 'uploaded') params.set('dateSource', filterState.dateSource);
+  if (filterState.dateFrom) params.set('dateFrom', filterState.dateFrom);
+  if (filterState.dateTo) params.set('dateTo', filterState.dateTo);
+  if (filterState.metaLocation) params.set('metaLocation', filterState.metaLocation);
+  if (filterState.metaCamera) params.set('metaCamera', filterState.metaCamera);
+  if (filterState.tags) params.set('tags', filterState.tags);
+  if (filterState.fileType) params.set('fileType', filterState.fileType);
+  if (filterState.fileExtension) params.set('fileExtension', filterState.fileExtension);
   return params;
 }
 
@@ -1413,6 +1443,306 @@ function setupRealtime() {
   realtimeSource.addEventListener('trash', scheduleRefresh);
 }
 
+function highlightActiveFilters() {
+  const toggle = document.getElementById('filters-toggle');
+  if (!toggle) return;
+  if (hasActiveFilters()) toggle.classList.add('active');
+  else toggle.classList.remove('active');
+}
+
+function setFilterDraftFromState() {
+  filterDraft = { ...filterState };
+}
+
+function normalizeFilterValue(value) {
+  return (value || '').trim();
+}
+
+function normalizeTags(value) {
+  const parts = String(value || '')
+    .split(',')
+    .map(t => t.trim())
+    .filter(Boolean);
+  return parts.join(',');
+}
+
+function formatDateInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return formatDateValue(date);
+}
+
+function formatDateValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function applyDatePreset(preset) {
+  const today = new Date();
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let start = new Date(end.getTime());
+
+  if (preset === 'today') {
+    // keep start as today
+  } else if (preset === 'last7') {
+    start.setUTCDate(start.getUTCDate() - 6);
+  } else if (preset === 'last30') {
+    start.setUTCDate(start.getUTCDate() - 29);
+  } else if (preset === 'thisyear') {
+    start = new Date(Date.UTC(end.getUTCFullYear(), 0, 1));
+  }
+
+  filterDraft.dateFrom = formatDateValue(start);
+  filterDraft.dateTo = formatDateValue(end);
+  document.getElementById('filter-date-from').value = filterDraft.dateFrom;
+  document.getElementById('filter-date-to').value = filterDraft.dateTo;
+}
+
+function syncFilterUIFromDraft() {
+  const dateSource = document.querySelectorAll('input[name="date-source"]');
+  dateSource.forEach(input => {
+    input.checked = input.value === filterDraft.dateSource;
+  });
+
+  document.getElementById('filter-date-from').value = formatDateInput(filterDraft.dateFrom);
+  document.getElementById('filter-date-to').value = formatDateInput(filterDraft.dateTo);
+
+  document.getElementById('filter-location').value = filterDraft.metaLocation;
+  document.getElementById('filter-camera').value = filterDraft.metaCamera;
+  document.getElementById('filter-tags').value = filterDraft.tags;
+
+  document.getElementById('filter-extension-custom').value = filterDraft.fileExtension;
+
+  const fileTypeItems = document.querySelectorAll('#filter-filetypes input[type="radio"]');
+  fileTypeItems.forEach(input => {
+    input.checked = input.value === filterDraft.fileType;
+  });
+
+  const extButtons = document.querySelectorAll('#filter-extensions .filters-pill');
+  extButtons.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === filterDraft.fileExtension);
+  });
+}
+
+function captureFilterDraftFromUI() {
+  const selectedSource = document.querySelector('input[name="date-source"]:checked');
+  filterDraft.dateSource = selectedSource ? selectedSource.value : 'uploaded';
+  filterDraft.dateFrom = normalizeFilterValue(document.getElementById('filter-date-from').value);
+  filterDraft.dateTo = normalizeFilterValue(document.getElementById('filter-date-to').value);
+  filterDraft.metaLocation = normalizeFilterValue(document.getElementById('filter-location').value);
+  filterDraft.metaCamera = normalizeFilterValue(document.getElementById('filter-camera').value);
+  filterDraft.tags = normalizeTags(document.getElementById('filter-tags').value);
+  filterDraft.fileType = normalizeFilterValue(document.querySelector('#filter-filetypes input[type="radio"]:checked')?.value || '');
+  const customExtension = normalizeFilterValue(document.getElementById('filter-extension-custom').value);
+  const pillExtension = document.querySelector('#filter-extensions .filters-pill.active')?.dataset.value || '';
+  filterDraft.fileExtension = customExtension || pillExtension;
+}
+
+function hasActiveFilters() {
+  const { dateSource, ...rest } = filterState;
+  const hasOtherFilters = Object.values(rest).some(value => value);
+  if (hasOtherFilters) return true;
+  return dateSource && dateSource !== 'uploaded';
+}
+
+function renderFilterChips() {
+  const container = document.getElementById('filter-chips');
+  if (!container) return;
+
+  const chips = [];
+  if (filterState.dateFrom || filterState.dateTo) {
+    const from = filterState.dateFrom || 'Any';
+    const to = filterState.dateTo || 'Any';
+    chips.push({ key: 'date', label: `Date ${from} → ${to}` });
+  }
+  if (filterState.dateSource && filterState.dateSource !== 'uploaded') {
+    chips.push({ key: 'dateSource', label: `Date source: ${filterState.dateSource}` });
+  }
+  if (filterState.metaLocation) chips.push({ key: 'metaLocation', label: `Location: ${filterState.metaLocation}` });
+  if (filterState.metaCamera) chips.push({ key: 'metaCamera', label: `Camera: ${filterState.metaCamera}` });
+  if (filterState.tags) chips.push({ key: 'tags', label: `Tags: ${filterState.tags}` });
+  if (filterState.fileType) chips.push({ key: 'fileType', label: `Type: ${filterState.fileType}` });
+  if (filterState.fileExtension) chips.push({ key: 'fileExtension', label: `Ext: ${filterState.fileExtension}` });
+
+  container.innerHTML = chips.map(chip => {
+    return `<button class="filter-chip" data-key="${chip.key}"><span>${escapeHtml(chip.label)}</span><span class="chip-remove">×</span></button>`;
+  }).join('');
+
+  container.querySelectorAll('.filter-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      if (key === 'date') {
+        filterState.dateFrom = '';
+        filterState.dateTo = '';
+      } else if (key === 'dateSource') {
+        filterState.dateSource = 'uploaded';
+      } else {
+        filterState[key] = '';
+      }
+      currentPage = 1;
+      exitMultiSelect();
+      renderFilterChips();
+      fetchFiles();
+    });
+  });
+
+  if (!hasActiveFilters()) container.innerHTML = '';
+  highlightActiveFilters();
+}
+
+function openFiltersModal() {
+  setFilterDraftFromState();
+  syncFilterUIFromDraft();
+  const modal = document.getElementById('filters-modal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeFiltersModal() {
+  document.getElementById('filters-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function fetchMetadataOptions() {
+  try {
+    const res = await fetch('/api/files/metadata-options');
+    metadataOptions = await res.json();
+  } catch {
+    metadataOptions = { dateSources: [], locations: [], cameras: [], tags: [], fileTypes: [], fileExtensions: [] };
+  }
+}
+
+function ensureUnknownOption(list) {
+  const normalized = Array.isArray(list) ? [...list] : [];
+  if (!normalized.includes('unknown')) normalized.push('unknown');
+  return normalized;
+}
+
+function populateFilterOptions() {
+  const locationSelect = document.getElementById('filter-location');
+  const cameraSelect = document.getElementById('filter-camera');
+  const tagList = document.getElementById('filter-tags-list');
+  const fileTypeContainer = document.getElementById('filter-filetypes');
+  const extensionContainer = document.getElementById('filter-extensions');
+
+  locationSelect.innerHTML = '<option value="">Any location</option>' +
+    ensureUnknownOption(metadataOptions.locations || []).map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
+
+  cameraSelect.innerHTML = '<option value="">Any camera</option>' +
+    ensureUnknownOption(metadataOptions.cameras || []).map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
+
+  tagList.innerHTML = (metadataOptions.tags || []).map(tag => `<option value="${escapeHtml(tag)}"></option>`).join('');
+  if (!tagList.querySelector('option[value="unknown"]')) {
+    tagList.insertAdjacentHTML('beforeend', '<option value="unknown"></option>');
+  }
+
+  const fileTypes = ensureUnknownOption(metadataOptions.fileTypes || []);
+  const fileTypeOptions = [''].concat(fileTypes);
+  fileTypeContainer.innerHTML = fileTypeOptions.map((type, idx) => {
+    const labelMap = {
+      image: 'Picture',
+      video: 'Video',
+      audio: 'Audio',
+      pdf: 'PDF',
+      text: 'Text',
+      other: 'Other',
+      unknown: 'Unknown',
+      '': 'Any',
+    };
+    const label = labelMap[type] || (type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Any');
+    return `
+      <label class="filters-checkbox">
+        <input type="radio" name="filter-filetype" value="${escapeHtml(type)}" ${idx === 0 ? 'checked' : ''}>
+        <span>${escapeHtml(label)}</span>
+      </label>
+    `;
+  }).join('');
+
+  extensionContainer.innerHTML = (metadataOptions.fileExtensions || []).map(ext => {
+    const value = ext.startsWith('.') ? ext : '.' + ext;
+    return `<button class="filters-pill" type="button" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
+  }).join('');
+}
+
+function setupFiltersModal() {
+  const toggleBtn = document.getElementById('filters-toggle');
+  const closeBtn = document.getElementById('filters-close');
+  const overlay = document.getElementById('filters-overlay');
+  const applyBtn = document.getElementById('filter-apply-btn');
+  const clearBtn = document.getElementById('filter-clear-btn');
+
+  toggleBtn.addEventListener('click', openFiltersModal);
+  closeBtn.addEventListener('click', closeFiltersModal);
+  overlay.addEventListener('click', closeFiltersModal);
+
+  document.querySelectorAll('.filters-pill[data-preset]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      applyDatePreset(btn.dataset.preset);
+    });
+  });
+
+  document.getElementById('filter-extensions').addEventListener('click', (e) => {
+    const btn = e.target.closest('.filters-pill');
+    if (!btn) return;
+    if (filterDraft.fileExtension === btn.dataset.value) {
+      filterDraft.fileExtension = '';
+    } else {
+      filterDraft.fileExtension = btn.dataset.value;
+    }
+    document.getElementById('filter-extension-custom').value = '';
+    syncFilterUIFromDraft();
+  });
+
+  document.getElementById('filter-extension-custom').addEventListener('input', (e) => {
+    const value = normalizeFilterValue(e.target.value);
+    if (value) {
+      filterDraft.fileExtension = value;
+      document.querySelectorAll('#filter-extensions .filters-pill').forEach(btn => btn.classList.remove('active'));
+      return;
+    }
+    filterDraft.fileExtension = '';
+    syncFilterUIFromDraft();
+  });
+
+  applyBtn.addEventListener('click', () => {
+    captureFilterDraftFromUI();
+    filterState = { ...filterDraft };
+    currentPage = 1;
+    exitMultiSelect();
+    renderFilterChips();
+    fetchFiles();
+    closeFiltersModal();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    filterDraft = {
+      dateSource: 'uploaded',
+      dateFrom: '',
+      dateTo: '',
+      metaLocation: '',
+      metaCamera: '',
+      tags: '',
+      fileType: '',
+      fileExtension: '',
+    };
+    filterState = { ...filterDraft };
+    currentPage = 1;
+    exitMultiSelect();
+    renderFilterChips();
+    fetchFiles();
+    syncFilterUIFromDraft();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('filters-modal').style.display === 'flex') {
+      closeFiltersModal();
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await fetchConfig();
   setupUpload();
@@ -1429,6 +1759,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupSettings();
   setupMultiToolbar();
   setupRenameModal();
+  setupFiltersModal();
   // Global keydown for Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -1437,7 +1768,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   await fetchDevices();
   populateDeviceFilter();
+  await fetchMetadataOptions();
+  populateFilterOptions();
+  setFilterDraftFromState();
+  syncFilterUIFromDraft();
   fetchFiles();
+  renderFilterChips();
   setupRealtime();
   pollIntervalId = setInterval(() => {
     if (!showingTrash) fetchFiles();
