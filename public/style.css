@@ -61,6 +61,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body.drag-selecting {
+  user-select: none;
+}
+
+body.drag-move-active {
+  user-select: none;
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -369,6 +377,9 @@ header {
 }
 
 .breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
@@ -378,6 +389,7 @@ header {
   align-items: center;
   gap: 6px;
   font-size: 13px;
+  min-width: 0;
 }
 
 .breadcrumb-link {
@@ -400,6 +412,11 @@ header {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.breadcrumb .folder-back-btn {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .toolbar-right {
@@ -492,6 +509,16 @@ header {
 .file-card.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 1px var(--primary);
+}
+
+.folder-card.drag-target {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary);
+  transform: translateY(-2px);
+}
+
+.drag-move-active .file-card {
+  cursor: grabbing;
 }
 
 .selection-box {
@@ -611,6 +638,7 @@ header {
 
 .folder-back-btn:hover { background: var(--primary-surface); }
 
+/* Folder breadcrumb name (grid) */
 .folder-breadcrumb-name {
   color: var(--text);
   font-weight: 500;
@@ -887,10 +915,18 @@ header {
   color: var(--text-secondary);
 }
 
+#multi-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 #multi-toolbar button:hover { background: var(--surface-hover); color: var(--text); }
 
 #multi-download-btn { background: var(--primary); color: #fff; border-color: var(--primary); }
 #multi-download-btn:hover { background: var(--primary-hover); }
+
+#multi-move-btn { border-color: var(--border-light); color: var(--text-secondary); }
+#multi-move-btn:hover { background: var(--surface-hover); color: var(--text); }
 
 #multi-delete-btn { color: var(--danger); border-color: var(--danger); }
 #multi-delete-btn:hover { background: var(--danger); color: #fff; }
@@ -929,13 +965,18 @@ header {
 
 .ctx-item:hover { background: var(--surface-hover); }
 
+.ctx-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ctx-divider { height: 1px; background: var(--border); margin: 4px 0; }
 
 .ctx-placeholder { color: var(--text-muted); font-style: italic; }
 .ctx-placeholder:hover { background: transparent; cursor: default; }
 
 /* ── Modals ── */
-#preview-modal, #confirm-modal, #rename-modal, #settings-modal, #qr-modal, #filters-modal {
+#preview-modal, #confirm-modal, #rename-modal, #settings-modal, #qr-modal, #filters-modal, #move-modal {
   display: none;
   position: fixed;
   inset: 0;
@@ -944,7 +985,7 @@ header {
   justify-content: center;
 }
 
-#preview-overlay, #confirm-overlay, #rename-overlay, #settings-overlay, #qr-overlay, #filters-overlay {
+#preview-overlay, #confirm-overlay, #rename-overlay, #settings-overlay, #qr-overlay, #filters-overlay, #move-overlay {
   position: absolute;
   inset: 0;
   background: rgba(0,0,0,0.6);
@@ -1070,7 +1111,7 @@ header {
 }
 
 /* Confirm modal */
-#confirm-content, .rename-content, #settings-content, #qr-content {
+#confirm-content, .rename-content, #settings-content, #qr-content, #move-content {
   position: relative;
   background: var(--surface);
   border-radius: var(--radius-lg);
@@ -1102,6 +1143,45 @@ header {
 }
 
 #rename-input:focus { border-color: var(--primary); }
+
+/* Move modal */
+#move-content h3 {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.move-field {
+  margin-bottom: 12px;
+}
+
+.move-field label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+#move-target, #move-new {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13px;
+  outline: none;
+}
+
+#move-target:focus, #move-new:focus { border-color: var(--primary); }
+
+.move-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
 
 /* Settings modal */
 #settings-content h2 { font-size: 16px; font-weight: 500; margin-bottom: 16px; color: var(--text); }

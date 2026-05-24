@@ -120,6 +120,10 @@ function deleteFilesByStoredNames(names) {
   txn(names);
 }
 
+function updateFileFolderPath(storedName, folderPath) {
+  db.prepare('UPDATE files SET folderPath = ? WHERE storedName = ?').run(folderPath || '', storedName);
+}
+
 // ── Paginated filtered query ──
 function getFilesFiltered({
   page = 1,
@@ -248,12 +252,24 @@ function getAllFolders() {
   return db.prepare("SELECT DISTINCT folderPath FROM files WHERE folderPath != '' AND folderPath IS NOT NULL UNION SELECT folderPath FROM folders ORDER BY folderPath").all().map(r => r.folderPath);
 }
 
+function getFilesByFolderPrefix(folderPath) {
+  const normalized = folderPath || '';
+  return db.prepare('SELECT * FROM files WHERE folderPath = ? OR folderPath LIKE ?')
+    .all(normalized, normalized + '/%');
+}
+
 function createFolder(name, folderPath) {
   db.prepare('INSERT INTO folders (name, folderPath) VALUES (?, ?)').run(name, folderPath);
 }
 
 function deleteFolder(folderPath) {
   db.prepare('DELETE FROM folders WHERE folderPath = ?').run(folderPath);
+}
+
+function deleteFolderPrefix(folderPath) {
+  const normalized = folderPath || '';
+  db.prepare('DELETE FROM folders WHERE folderPath = ? OR folderPath LIKE ?')
+    .run(normalized, normalized + '/%');
 }
 
 function renameFolder(oldPath, newPath) {
@@ -371,4 +387,4 @@ function close() {
   if (db) db.close();
 }
 
-module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getAllDateSources, getAllMetaLocations, getAllMetaCameras, getAllTags, getAllFileTypes, getAllFileExtensions, getAllFolders, createFolder, deleteFolder, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
+module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, updateFileFolderPath, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getAllDateSources, getAllMetaLocations, getAllMetaCameras, getAllTags, getAllFileTypes, getAllFileExtensions, getAllFolders, getFilesByFolderPrefix, createFolder, deleteFolder, deleteFolderPrefix, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
