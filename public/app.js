@@ -35,6 +35,7 @@ let metadataOptions = {
 
 // Multi-select state
 let selectedFiles = new Set();
+let selectedFolders = new Set();
 let multiSelectActive = false;
 let longPressTimer = null;
 let dragSelecting = false;
@@ -42,8 +43,17 @@ let dragStart = null;
 let dragLastPoint = null;
 let dragRafId = null;
 let selectionBox = null;
+let dragMoveActive = false;
+let dragMoveIds = [];
+let dragMoveTouchId = null;
+let dragMoveTargetFolder = null;
+let dragMoveStart = null;
+let dragMoveCandidate = null;
+let dragMoveMouseStart = null;
+let dragMoveSkipClick = false;
 
 let trashState = { items: [] };
+let moveContext = null;
 
 let allDevices = [];
 let allFolders = [];
@@ -388,13 +398,19 @@ function renderFileGrid(files) {
     html += `<div class="folder-breadcrumb"><button class="folder-back-btn" data-action="back">← Back to root</button><span class="folder-breadcrumb-name">📁 ${escapeHtml(currentFolder)}</span></div>`;
   }
 
-  // Folder cards in root view
-  if (!currentFolder && allFolders.length > 0) {
-    for (const folder of allFolders) {
+  // Folder cards — show all at root, or sub-folders inside a folder
+  const visibleFolders = currentFolder
+    ? allFolders.filter(f => f.startsWith(currentFolder + '/'))
+    : allFolders;
+  if (visibleFolders.length > 0) {
+    for (const folder of visibleFolders) {
+      const displayName = currentFolder ? folder.slice(currentFolder.length + 1) : folder;
+      const isSelected = selectedFolders.has(folder);
+      const selectedClass = isSelected ? ' selected' : '';
       html += `
-        <div class="file-card folder-card" data-folder="${escapeHtml(folder)}">
+        <div class="file-card folder-card${selectedClass}" data-folder="${escapeHtml(folder)}">
           <div class="folder-card-icon">📁</div>
-          <div class="file-name">${escapeHtml(folder)}</div>
+          <div class="file-name">${escapeHtml(displayName)}</div>
           <div class="folder-card-hint">Click to open</div>
         </div>
       `;
@@ -430,13 +446,14 @@ function renderFileGrid(files) {
     // Long press for mobile
     let holdTimer = null;
     card.addEventListener('touchstart', (e) => {
+      if (dragMoveActive) return;
       holdTimer = setTimeout(() => {
         holdTimer = null;
         e.preventDefault();
         enterMultiSelect();
         toggleFileSelection(stored);
       }, 500);
-    });
+    }, { passive: true });
     card.addEventListener('touchend', () => {
       if (holdTimer) {
         clearTimeout(holdTimer);
@@ -452,6 +469,10 @@ function renderFileGrid(files) {
 
     card.addEventListener('click', (e) => {
       if (e.target.closest('.file-actions')) return;
+      if (dragMoveActive || dragMoveSkipClick) {
+        dragMoveSkipClick = false;
+        return;
+      }
       if (e.ctrlKey || e.metaKey) {
         enterMultiSelect();
         toggleFileSelection(stored);
@@ -484,12 +505,47 @@ function renderFileGrid(files) {
 
   // Folder card clicks
   grid.querySelectorAll('.folder-card').forEach(card => {
-    card.addEventListener('click', () => {
-      currentFolder = card.dataset.folder;
+    const folderPath = card.dataset.folder;
+    card.addEventListener('click', (e) => {
+      if (dragMoveActive || dragMoveSkipClick) {
+        dragMoveSkipClick = false;
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) {
+        enterMultiSelect();
+        toggleFolderSelection(folderPath);
+        return;
+      }
+      if (multiSelectActive) {
+        toggleFolderSelection(folderPath);
+        return;
+      }
+      currentFolder = folderPath;
       currentPage = 1;
       exitMultiSelect();
       fetchFiles();
     });
+    card.addEventListener('touchstart', (e) => {
+      if (dragMoveActive) return;
+      let holdTimer = setTimeout(() => {
+        holdTimer = null;
+        e.preventDefault();
+        enterMultiSelect();
+        toggleFolderSelection(folderPath);
+      }, 500);
+      card.addEventListener('touchend', () => {
+        if (holdTimer) {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+        }
+      }, { once: true });
+      card.addEventListener('touchmove', () => {
+        if (holdTimer) {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+        }
+      }, { once: true });
+    }, { passive: true });
     card.addEventListener('contextmenu', (e) => {
       hideContextMenu();
       showContextMenu(e.clientX, e.clientY, { type: 'folder', folderPath: card.dataset.folder });
@@ -520,6 +576,30 @@ function renderFileGrid(files) {
     hideContextMenu();
     showContextMenu(e.clientX, e.clientY, { type: 'empty' });
   });
+
+  // Mobile long-press on empty space
+  grid.addEventListener('touchstart', (e) => {
+    if (e.target.closest('.file-card, .folder-card, .folder-breadcrumb')) return;
+    let holdTimer = setTimeout(() => {
+      holdTimer = null;
+      const touch = e.touches[0];
+      if (!touch) return;
+      hideContextMenu();
+      showContextMenu(touch.clientX, touch.clientY, { type: 'empty' });
+    }, 500);
+    grid.addEventListener('touchend', () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    }, { once: true });
+    grid.addEventListener('touchmove', () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    }, { once: true });
+  }, { passive: true });
 }
 
 function renderPagination() {
@@ -612,6 +692,7 @@ function enterMultiSelect() {
 function exitMultiSelect() {
   multiSelectActive = false;
   selectedFiles.clear();
+  selectedFolders.clear();
   document.body.classList.remove('multiselect-active');
   document.getElementById('multi-toolbar').classList.remove('visible');
   hideContextMenu();
@@ -619,21 +700,29 @@ function exitMultiSelect() {
 }
 
 function toggleFileSelection(storedName) {
+  console.log('toggleFileSelection: storedName=%s had=%s', storedName, selectedFiles.has(storedName));
   if (selectedFiles.has(storedName)) selectedFiles.delete(storedName);
   else selectedFiles.add(storedName);
   updateMultiUI();
 }
 
+function toggleFolderSelection(folderPath) {
+  if (selectedFolders.has(folderPath)) selectedFolders.delete(folderPath);
+  else selectedFolders.add(folderPath);
+  updateMultiUI();
+}
+
 function updateMultiUI(options = {}) {
   const { skipRender = false } = options;
-  const count = selectedFiles.size;
+  const count = selectedFiles.size + selectedFolders.size;
   const toolbar = document.getElementById('multi-toolbar');
-  document.getElementById('multi-count').textContent = count + ' file' + (count !== 1 ? 's' : '') + ' selected';
+  document.getElementById('multi-count').textContent = count + ' item' + (count !== 1 ? 's' : '') + ' selected';
   if (count === 0) {
     toolbar.classList.remove('visible');
     document.body.classList.remove('multiselect-active');
     multiSelectActive = false;
   }
+  updateMultiToolbarForContext();
   if (skipRender || dragSelecting) {
     syncCardSelectionClasses();
     return;
@@ -648,6 +737,10 @@ function syncCardSelectionClasses() {
   cards.forEach(card => {
     card.classList.toggle('selected', selectedFiles.has(card.dataset.stored));
   });
+  const folders = getSelectableFolders();
+  folders.forEach(card => {
+    card.classList.toggle('selected', selectedFolders.has(card.dataset.folder));
+  });
 }
 
 function setupMultiToolbar() {
@@ -656,9 +749,28 @@ function setupMultiToolbar() {
     else downloadSelectedFiles();
   });
 
+  document.getElementById('multi-move-btn').addEventListener('click', () => {
+    if (selectedFiles.size === 0) {
+      showToast('Select files to move', 'info');
+      return;
+    }
+    if (selectedFolders.size > 0) {
+      showToast('Folders cannot be moved yet', 'info');
+    }
+    openMoveModal({ ids: Array.from(selectedFiles) });
+  });
+
   document.getElementById('multi-delete-btn').addEventListener('click', async () => {
     if (showingTrash) permanentlyDeleteSelectedFromTrash();
-    else moveSelectedFilesToTrash();
+    else if (selectedFolders.size > 0 && selectedFiles.size === 0) {
+      showConfirmModal('Delete ' + selectedFolders.size + ' folder(s) and all files inside?', async () => {
+        batchDeleteFolders(Array.from(selectedFolders));
+      });
+    } else if (selectedFolders.size > 0) {
+      showConfirmModal('Move ' + selectedFiles.size + ' file(s) to trash and delete ' + selectedFolders.size + ' folder(s)?', async () => {
+        batchDeleteFilesAndFolders(Array.from(selectedFiles), Array.from(selectedFolders));
+      });
+    } else moveSelectedFilesToTrash();
   });
 
   document.getElementById('multi-cancel-btn').addEventListener('click', exitMultiSelect);
@@ -668,12 +780,20 @@ function updateMultiToolbarForContext() {
   const downloadBtn = document.getElementById('multi-download-btn');
   const deleteBtn = document.getElementById('multi-delete-btn');
   if (!downloadBtn || !deleteBtn) return;
+  const moveBtn = document.getElementById('multi-move-btn');
+  if (moveBtn) moveBtn.disabled = selectedFiles.size === 0;
   if (showingTrash) {
     downloadBtn.textContent = 'Restore';
     deleteBtn.textContent = 'Delete';
+    downloadBtn.disabled = selectedFiles.size === 0;
+    deleteBtn.disabled = selectedFiles.size === 0;
+    if (moveBtn) moveBtn.disabled = true;
   } else {
     downloadBtn.textContent = 'Download';
-    deleteBtn.textContent = 'Trash';
+    deleteBtn.textContent = selectedFolders.size > 0 && selectedFiles.size === 0 ? 'Delete' : 'Trash';
+    downloadBtn.disabled = selectedFiles.size === 0;
+    deleteBtn.disabled = selectedFiles.size === 0 && selectedFolders.size === 0;
+    if (moveBtn) moveBtn.disabled = selectedFiles.size === 0;
   }
 }
 
@@ -689,6 +809,7 @@ async function downloadSelectedFiles() {
 function moveSelectedFilesToTrash() {
   const ids = Array.from(selectedFiles);
   if (ids.length === 0) return;
+  if (selectedFolders.size > 0) showToast('Folders cannot be moved to trash yet', 'info');
   showConfirmModal('Move ' + ids.length + ' file(s) to trash?', async () => {
     try {
       const res = await fetch('/api/files/batch-trash', {
@@ -739,6 +860,42 @@ function permanentlyDeleteSelectedFromTrash() {
   });
 }
 
+async function batchDeleteFolders(folderPaths) {
+  let deleted = 0;
+  await Promise.all(folderPaths.map(async (path) => {
+    try {
+      const res = await fetch('/api/folders?path=' + encodeURIComponent(path), { method: 'DELETE' });
+      if (res.ok) deleted += 1;
+      else console.error('Delete folder', path, 'returned', res.status);
+    } catch (e) { console.error('Delete folder', path, 'failed:', e); }
+  }));
+  showToast('Deleted ' + deleted + ' folder(s)', 'info');
+  exitMultiSelect();
+  fetchFiles();
+}
+
+async function batchDeleteFilesAndFolders(ids, folderPaths) {
+  try {
+    const res = await fetch('/api/files/batch-trash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!res.ok) console.error('batch-trash returned', res.status);
+  } catch (e) { console.error('batch-trash failed:', e); }
+  let deleted = 0;
+  await Promise.all(folderPaths.map(async (path) => {
+    try {
+      const res = await fetch('/api/folders?path=' + encodeURIComponent(path), { method: 'DELETE' });
+      if (res.ok) deleted += 1;
+      else console.error('Delete folder', path, 'returned', res.status);
+    } catch (e) { console.error('Delete folder', path, 'failed:', e); }
+  }));
+  showToast('Moved ' + ids.length + ' file(s) and deleted ' + deleted + ' folder(s)', 'info');
+  exitMultiSelect();
+  fetchFiles();
+}
+
 // Context menu
 function showContextMenu(x, y, ctx) {
   const menu = document.getElementById('context-menu');
@@ -746,16 +903,19 @@ function showContextMenu(x, y, ctx) {
   const isFolder = ctx.type === 'folder';
   const file = ctx.file;
   const isText = file && isTextFile(file);
+  const hasFileSelection = selectedFiles.size > 0;
+  const hasFolderSelection = selectedFolders.size > 0;
 
   let items = '';
 
   if (multiSelectActive) {
     // Multi-select mode — only group actions
+    const hasAnySelectable = hasFileSelection || hasFolderSelection;
     items = `
-      <button class="ctx-item" data-action="download">⬇️ Download</button>
-      <button class="ctx-item" data-action="delete">🗑 Move to Trash</button>
+      <button class="ctx-item" data-action="download" ${hasFileSelection ? '' : 'disabled'}>⬇️ Download</button>
+      <button class="ctx-item" data-action="delete" ${hasAnySelectable ? '' : 'disabled'}>🗑 ${hasFolderSelection && !hasFileSelection ? 'Delete' : 'Move to Trash'}</button>
       <div class="ctx-divider"></div>
-      <button class="ctx-item ctx-placeholder" data-action="move">📂 Move to folder</button>
+      <button class="ctx-item" data-action="move" ${hasFileSelection ? '' : 'disabled'}>📂 Move to folder</button>
       <div class="ctx-divider"></div>
       <button class="ctx-item" data-action="cancel">✕ Cancel</button>
     `;
@@ -769,7 +929,7 @@ function showContextMenu(x, y, ctx) {
       <button class="ctx-item" data-action="rename">✏️ Rename</button>
       ${isText ? `<button class="ctx-item ctx-placeholder" data-action="edit">📝 Edit</button>` : ''}
       <button class="ctx-item ctx-placeholder" data-action="tags">🏷️ Tags</button>
-      <button class="ctx-item ctx-placeholder" data-action="move">📂 Move to folder</button>
+      <button class="ctx-item" data-action="move">📂 Move to folder</button>
       <div class="ctx-divider"></div>
       <button class="ctx-item" data-action="cancel">✕ Cancel</button>
     `;
@@ -808,6 +968,12 @@ function showContextMenu(x, y, ctx) {
   menu.querySelectorAll('.ctx-item').forEach(item => {
     item.addEventListener('click', async () => {
       const action = item.dataset.action;
+      if (item.disabled) {
+        const message = action === 'move' ? 'Select files to move' : 'Select files first';
+        showToast(message, 'info');
+        hideContextMenu();
+        return;
+      }
 
       if (action === 'preview' && file) {
         openPreview(file);
@@ -817,17 +983,17 @@ function showContextMenu(x, y, ctx) {
         exitMultiSelect();
         fetchFiles();
       } else if (action === 'download') {
-        if (isFolder) {
-          const res = await fetch('/api/files?folder=' + encodeURIComponent(ctx.folderPath) + '&limit=200');
-          const data = await res.json();
-          const ids = data.files.map(f => f.storedName);
-          await downloadAsZip(ids, ctx.folderPath.replace(/[/\\]/g, '_') + '.zip');
-        } else if (multiSelectActive) {
+        if (multiSelectActive) {
           const ids = Array.from(selectedFiles);
           if (ids.length > 0 && await downloadAsZip(ids)) {
             showToast('Downloaded ' + ids.length + ' file(s)', 'success');
             exitMultiSelect();
           }
+        } else if (isFolder) {
+          const res = await fetch('/api/files?folder=' + encodeURIComponent(ctx.folderPath) + '&limit=200');
+          const data = await res.json();
+          const ids = data.files.map(f => f.storedName);
+          await downloadAsZip(ids, ctx.folderPath.replace(/[/\\]/g, '_') + '.zip');
         } else {
           const a = document.createElement('a');
           a.href = '/api/files/' + ctx.storedName;
@@ -838,23 +1004,15 @@ function showContextMenu(x, y, ctx) {
           document.body.removeChild(a);
         }
       } else if (action === 'delete') {
-        if (isFolder) {
-          showConfirmModal('Delete all files in this folder?', async () => {
-            const res = await fetch('/api/files?folder=' + encodeURIComponent(ctx.folderPath) + '&limit=200');
-            const data = await res.json();
-            const ids = data.files.map(f => f.storedName);
-            if (ids.length > 0) {
-              await fetch('/api/files/batch-trash', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids })
-              });
-              showToast('Folder moved to trash', 'info');
-              fetchFiles();
-            }
-          });
-        } else if (multiSelectActive) {
+        if (multiSelectActive) {
           const ids = Array.from(selectedFiles);
-          if (ids.length > 0) {
+          const folderPaths = Array.from(selectedFolders);
+          console.log('multi-delete: ids=%o folderPaths=%o multiSelectActive=%s isFolder=%s', ids, folderPaths, multiSelectActive, isFolder);
+          if (ids.length > 0 && folderPaths.length > 0) {
+            showConfirmModal('Move ' + ids.length + ' file(s) and delete ' + folderPaths.length + ' folder(s) to trash?', async () => {
+              await batchDeleteFilesAndFolders(ids, folderPaths);
+            });
+          } else if (ids.length > 0) {
             showConfirmModal('Move ' + ids.length + ' file(s) to trash?', async () => {
               try {
                 const res = await fetch('/api/files/batch-trash', {
@@ -868,7 +1026,23 @@ function showContextMenu(x, y, ctx) {
               exitMultiSelect();
               fetchFiles();
             });
+          } else if (folderPaths.length > 0) {
+            showConfirmModal('Delete ' + folderPaths.length + ' folder(s) and all files inside?', async () => {
+              await batchDeleteFolders(folderPaths);
+            });
           }
+        } else if (isFolder) {
+          showConfirmModal('Delete this folder and all files inside?', async () => {
+            try {
+              const res = await fetch('/api/folders?path=' + encodeURIComponent(ctx.folderPath), { method: 'DELETE' });
+              if (res.ok) {
+                showToast('Folder moved to trash', 'info');
+                fetchFiles();
+              } else {
+                showToast('Failed to delete folder', 'error');
+              }
+            } catch { showToast('Failed to delete folder', 'error'); }
+          });
         } else {
           showConfirmModal('Delete this file?', async () => {
             await fetch('/api/files/' + ctx.storedName, { method: 'DELETE' });
@@ -880,6 +1054,18 @@ function showContextMenu(x, y, ctx) {
         if (file) openRenameModal({ type: 'file', file });
         else if (isFolder) openRenameModal({ type: 'folder', folderPath: ctx.folderPath });
         else showToast('Coming soon', 'info');
+      } else if (action === 'move') {
+        if (multiSelectActive) {
+          if (selectedFiles.size === 0) {
+            showToast('Select files to move', 'info');
+          } else {
+            openMoveModal({ ids: Array.from(selectedFiles) });
+          }
+        } else if (isFile && file) {
+          openMoveModal({ ids: [file.storedName] });
+        } else {
+          showToast('Select files to move', 'info');
+        }
       } else if (action === 'create-folder') {
         openCreateFolderModal();
       } else if (action === 'upload-files') {
@@ -1147,6 +1333,7 @@ function renderTrashGrid(items) {
     const stored = card.dataset.stored;
     let holdTimer = null;
     card.addEventListener('touchstart', (e) => {
+      if (dragMoveActive) return;
       if (e.target.closest('.trash-actions')) return;
       holdTimer = setTimeout(() => {
         holdTimer = null;
@@ -1154,7 +1341,7 @@ function renderTrashGrid(items) {
         enterMultiSelect();
         toggleFileSelection(stored);
       }, 500);
-    });
+    }, { passive: true });
     card.addEventListener('touchend', () => {
       if (holdTimer) {
         clearTimeout(holdTimer);
@@ -1170,6 +1357,10 @@ function renderTrashGrid(items) {
 
     card.addEventListener('click', (e) => {
       if (e.target.closest('.trash-actions')) return;
+      if (dragMoveActive || dragMoveSkipClick) {
+        dragMoveSkipClick = false;
+        return;
+      }
       if (e.ctrlKey || e.metaKey) {
         enterMultiSelect();
         toggleFileSelection(stored);
@@ -1227,7 +1418,8 @@ function isModalOpen() {
     'rename-modal',
     'settings-modal',
     'qr-modal',
-    'filters-modal'
+    'filters-modal',
+    'move-modal'
   ];
   return modalIds.some(id => {
     const el = document.getElementById(id);
@@ -1239,6 +1431,12 @@ function getSelectableCards() {
   const grid = document.getElementById('file-grid');
   if (!grid) return [];
   return Array.from(grid.querySelectorAll('.file-card[data-stored]'));
+}
+
+function getSelectableFolders() {
+  const grid = document.getElementById('file-grid');
+  if (!grid) return [];
+  return Array.from(grid.querySelectorAll('.folder-card[data-folder]'));
 }
 
 function ensureSelectionBox() {
@@ -1286,10 +1484,16 @@ function updateSelectionBoxPosition(rect) {
 
 function applySelectionFromRect(rect) {
   const cards = getSelectableCards();
+  const folders = showingTrash ? [] : getSelectableFolders();
   selectedFiles.clear();
+  selectedFolders.clear();
   cards.forEach(card => {
     const cardRect = card.getBoundingClientRect();
     if (rectsIntersect(rect, cardRect)) selectedFiles.add(card.dataset.stored);
+  });
+  folders.forEach(card => {
+    const cardRect = card.getBoundingClientRect();
+    if (rectsIntersect(rect, cardRect)) selectedFolders.add(card.dataset.folder);
   });
   updateMultiUI({ skipRender: true });
 }
@@ -1354,6 +1558,154 @@ function setupDragSelect() {
   document.addEventListener('mouseup', finishDragSelect);
 }
 
+function getDragMoveIds() {
+  if (selectedFiles.size > 0) return Array.from(selectedFiles);
+  return [];
+}
+
+function startDragMoveFromCard(e, storedName) {
+  if (showingTrash) return;
+  if (e.button !== undefined && e.button !== 0) return;
+  if (currentFolder) return;
+  if (selectedFolders.size > 0) {
+    showToast('Folders cannot be moved yet', 'info');
+    return;
+  }
+  if (e.target && e.target.closest && e.target.closest('.folder-card')) return;
+  const ids = getDragMoveIds();
+  if (ids.length === 0) {
+    ids.push(storedName);
+    selectedFiles.clear();
+    selectedFolders.clear();
+    ids.forEach(id => selectedFiles.add(id));
+    enterMultiSelect();
+    updateMultiUI({ skipRender: true });
+  }
+  dragMoveActive = true;
+  dragMoveIds = ids;
+  dragMoveTargetFolder = null;
+  document.body.classList.add('drag-move-active');
+}
+
+function updateDragMoveTarget(x, y) {
+  if (!dragMoveActive) return;
+  const el = document.elementFromPoint(x, y);
+  const folderCard = el ? el.closest('.folder-card') : null;
+  const nextTarget = folderCard ? folderCard.dataset.folder : null;
+  if (dragMoveTargetFolder === nextTarget) return;
+  dragMoveTargetFolder = nextTarget;
+  document.querySelectorAll('.folder-card').forEach(card => {
+    card.classList.toggle('drag-target', card.dataset.folder === dragMoveTargetFolder);
+  });
+}
+
+async function finishDragMove() {
+  if (!dragMoveActive) return;
+  const target = dragMoveTargetFolder;
+  dragMoveActive = false;
+  dragMoveIds = [];
+  dragMoveTargetFolder = null;
+  document.body.classList.remove('drag-move-active');
+  document.querySelectorAll('.folder-card').forEach(card => card.classList.remove('drag-target'));
+  if (!target) return;
+  const ids = Array.from(selectedFiles);
+  if (ids.length === 0) return;
+  if (ids.length > 1) {
+    showConfirmModal('Move ' + ids.length + ' file(s) to ' + target + '?', async () => {
+      await moveFilesToFolder(ids, target);
+    });
+    return;
+  }
+  await moveFilesToFolder(ids, target);
+}
+
+function setupDragMove() {
+  const grid = document.getElementById('file-grid');
+  if (!grid) return;
+
+  grid.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.file-card[data-stored]');
+    if (!card) return;
+    e.preventDefault();
+  });
+
+  grid.addEventListener('mousedown', (e) => {
+    const card = e.target.closest('.file-card[data-stored]');
+    if (!card || e.target.closest('.file-actions')) return;
+    if (currentFolder || showingTrash) return;
+    if (selectedFolders.size > 0) return;
+    if (e.ctrlKey || e.metaKey) return;
+    if (dragSelecting) return;
+    dragMoveCandidate = card.dataset.stored;
+    dragMoveMouseStart = { x: e.clientX, y: e.clientY };
+  });
+
+  grid.addEventListener('mousemove', (e) => {
+    if (dragMoveCandidate && !dragMoveActive && dragMoveMouseStart) {
+      const dx = e.clientX - dragMoveMouseStart.x;
+      const dy = e.clientY - dragMoveMouseStart.y;
+      if (Math.hypot(dx, dy) > 6) {
+        startDragMoveFromCard(e, dragMoveCandidate);
+        dragMoveCandidate = null;
+        dragMoveMouseStart = null;
+        dragMoveSkipClick = true;
+      }
+    }
+    if (dragMoveActive) updateDragMoveTarget(e.clientX, e.clientY);
+  });
+
+  document.addEventListener('mouseup', () => {
+    dragMoveCandidate = null;
+    dragMoveMouseStart = null;
+    finishDragMove();
+  });
+
+  grid.addEventListener('touchstart', (e) => {
+    const card = e.target.closest('.file-card[data-stored]');
+    if (!card || e.target.closest('.file-actions')) return;
+    if (dragSelecting) return;
+    if (currentFolder) return;
+    if (showingTrash) return;
+    if (e.target.closest('.folder-card')) return;
+    if (selectedFolders.size > 0) return;
+    dragMoveTouchId = e.changedTouches[0].identifier;
+    dragMoveStart = { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+  }, { passive: true });
+
+  grid.addEventListener('touchmove', (e) => {
+    if (dragMoveTouchId === null) return;
+    const touch = Array.from(e.changedTouches).find(t => t.identifier === dragMoveTouchId);
+    if (!touch) return;
+    const dx = touch.clientX - dragMoveStart.x;
+    const dy = touch.clientY - dragMoveStart.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dragMoveActive && dist > 8) {
+      const card = e.target.closest('.file-card[data-stored]');
+      if (!card) return;
+      startDragMoveFromCard(e, card.dataset.stored);
+      document.body.style.overflow = 'hidden';
+      dragMoveSkipClick = true;
+    }
+    if (dragMoveActive) {
+      updateDragMoveTarget(touch.clientX, touch.clientY);
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  grid.addEventListener('touchend', () => {
+    if (dragMoveTouchId === null) return;
+    dragMoveTouchId = null;
+    dragMoveStart = null;
+    if (dragMoveActive) {
+      document.body.style.overflow = '';
+      finishDragMove();
+    }
+    if (dragMoveSkipClick) {
+      setTimeout(() => { dragMoveSkipClick = false; }, 0);
+    }
+  });
+}
+
 function setupKeyboardShortcuts() {
   document.addEventListener('keydown', (e) => {
     if (isTypingTarget(e.target) || isModalOpen()) return;
@@ -1362,8 +1714,13 @@ function setupKeyboardShortcuts() {
       e.preventDefault();
       const cards = getSelectableCards();
       selectedFiles.clear();
+      selectedFolders.clear();
       cards.forEach(card => selectedFiles.add(card.dataset.stored));
-      if (selectedFiles.size > 0) enterMultiSelect();
+      if (!showingTrash) {
+        const folders = getSelectableFolders();
+        folders.forEach(card => selectedFolders.add(card.dataset.folder));
+      }
+      if (selectedFiles.size > 0 || selectedFolders.size > 0) enterMultiSelect();
       updateMultiUI();
       return;
     }
@@ -1451,7 +1808,7 @@ function openCreateFolderModal() {
   document.getElementById('rename-title').textContent = 'Create new folder';
   document.getElementById('rename-input').value = '';
   document.getElementById('rename-input').placeholder = 'Folder name';
-  renameContext = { type: 'create-folder' };
+  renameContext = { type: 'create-folder', parentFolder: currentFolder };
   document.getElementById('rename-modal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
   document.getElementById('rename-input').focus();
@@ -1471,10 +1828,12 @@ function setupRenameModal() {
     try {
       let res;
       if (renameContext.type === 'create-folder') {
+        const folderPath = renameContext.parentFolder ? renameContext.parentFolder + '/' + name : name;
+        console.log('create-folder: parentFolder=%s name=%s folderPath=%s', renameContext.parentFolder, name, folderPath);
         res = await fetch('/api/folders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name })
+          body: JSON.stringify({ folderPath })
         });
         if (!res.ok) { showToast('Failed to create folder', 'error'); return; }
         showToast('Folder created', 'success');
@@ -1507,6 +1866,97 @@ function setupRenameModal() {
     if (e.key === 'Escape' && document.getElementById('rename-modal').style.display === 'flex') closeRenameModal();
     if (e.key === 'Enter' && document.getElementById('rename-modal').style.display === 'flex') {
       document.getElementById('rename-save-btn').click();
+    }
+  });
+}
+
+function openMoveModal(ctx) {
+  moveContext = ctx;
+  const select = document.getElementById('move-target');
+  const input = document.getElementById('move-new');
+  const options = ['__ROOT__'].concat(allFolders);
+  select.innerHTML = options.map(folder => {
+    if (folder === '__ROOT__') return '<option value="__ROOT__">(Root)</option>';
+    return `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`;
+  }).join('');
+  select.value = '__ROOT__';
+  input.value = '';
+  document.getElementById('move-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  input.focus();
+}
+
+function closeMoveModal() {
+  moveContext = null;
+  document.getElementById('move-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function sanitizeFolderName(name) {
+  return String(name || '').trim().replace(/[/\\]/g, '');
+}
+
+async function moveFilesToFolder(ids, folderPath) {
+  if (!ids || ids.length === 0) return;
+  const res = await fetch('/api/files/batch-move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, folderPath })
+  });
+  if (!res.ok) {
+    showToast('Failed to move files', 'error');
+    return;
+  }
+  const data = await res.json();
+  if (data.moved && data.moved.length > 0) {
+    showToast('Moved ' + data.moved.length + ' file(s)', 'success');
+  }
+  if (data.failed && data.failed.length > 0) {
+    showToast(data.failed.length + ' file(s) failed to move', 'error');
+  }
+  exitMultiSelect();
+  fetchFiles();
+}
+
+function setupMoveModal() {
+  document.getElementById('move-cancel-btn').addEventListener('click', closeMoveModal);
+  document.getElementById('move-overlay').addEventListener('click', closeMoveModal);
+  document.getElementById('move-save-btn').addEventListener('click', async () => {
+    if (!moveContext) return;
+    const select = document.getElementById('move-target');
+    const input = document.getElementById('move-new');
+    const newName = sanitizeFolderName(input.value);
+    let target = select.value || '';
+    if (newName && target) {
+      showToast('Choose a folder or enter a new one, not both', 'info');
+      return;
+    }
+    if (newName) {
+      try {
+        const folderPath = currentFolder ? currentFolder + '/' + newName : newName;
+        console.log('move-modal create-folder: currentFolder=%s newName=%s folderPath=%s', currentFolder, newName, folderPath);
+        const res = await fetch('/api/folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath })
+        });
+        if (!res.ok) {
+          showToast('Failed to create folder', 'error');
+          return;
+        }
+        target = folderPath;
+        allFolders = Array.from(new Set(allFolders.concat(target))).sort();
+      } catch { showToast('Failed to create folder', 'error'); return; }
+    }
+    if (target === '__ROOT__') target = '';
+    const ids = moveContext.ids;
+    closeMoveModal();
+    await moveFilesToFolder(ids, target);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('move-modal').style.display === 'flex') closeMoveModal();
+    if (e.key === 'Enter' && document.getElementById('move-modal').style.display === 'flex') {
+      document.getElementById('move-save-btn').click();
     }
   });
 }
@@ -1572,11 +2022,15 @@ function renderPending() {
 function uploadFile(file) {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
+    let uploadFolder = currentFolder ? currentFolder.replace(/\\/g, '/') : '';
     if (file.webkitRelativePath) {
       const parts = file.webkitRelativePath.split('/');
       parts.pop();
-      formData.append('folderPath', parts.join('/'));
+      const relPath = parts.join('/');
+      if (uploadFolder && relPath) uploadFolder = uploadFolder + '/' + relPath;
+      else if (relPath) uploadFolder = relPath;
     }
+    if (uploadFolder) formData.append('folderPath', uploadFolder);
     formData.append('file', file);
     const xhr = new XMLHttpRequest();
     const progressBar = document.getElementById('progress-bar');
@@ -2045,8 +2499,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupSettings();
   setupMultiToolbar();
   setupRenameModal();
+  setupMoveModal();
   setupFiltersModal();
   setupDragSelect();
+  setupDragMove();
   setupKeyboardShortcuts();
   // Global keydown for Escape
   document.addEventListener('keydown', (e) => {

@@ -136,6 +136,7 @@
   <div id="multi-toolbar">
     <span id="multi-count">0 selected</span>
     <button id="multi-download-btn">⬇ Download</button>
+    <button id="multi-move-btn">📂 Move</button>
     <button id="multi-delete-btn">⎔ Trash</button>
     <button id="multi-cancel-btn">Cancel</button>
   </div>
@@ -280,6 +281,25 @@
       <div class="filters-actions">
         <button class="btn-secondary" type="button" id="filter-clear-btn">Clear</button>
         <button class="btn-primary" type="button" id="filter-apply-btn">Apply filters</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="move-modal">
+    <div id="move-overlay"></div>
+    <div id="move-content">
+      <h3>Move to folder</h3>
+      <div class="move-field">
+        <label for="move-target">Choose folder</label>
+        <select id="move-target"></select>
+      </div>
+      <div class="move-field">
+        <label for="move-new">Or create new</label>
+        <input id="move-new" type="text" placeholder="New folder name">
+      </div>
+      <div class="move-actions">
+        <button id="move-cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="move-save-btn" class="btn-primary">Move</button>
       </div>
     </div>
   </div>

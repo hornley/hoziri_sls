@@ -34,6 +34,7 @@ function recordToResponse(record) {
     originalName: record.originalName,
     storedName: record.storedName,
     folderPath,
+    folderName: folderPath ? path.posix.basename(folderPath.replace(/\\/g, '/')) : '',
     size: record.size,
     sizeFormatted,
     mimeType: record.mimeType,
@@ -65,10 +66,25 @@ function recordToTrashResponse(record) {
     extension: record.extension,
     isImage: record.isImage === 1,
     folderPath,
+    folderName: folderPath ? path.posix.basename(folderPath.replace(/\\/g, '/')) : '',
     deviceInfo: record.deviceInfo,
     deletedAt: record.deletedAt,
     url: '/uploads/_trash/' + record.storedName,
   };
+}
+
+function normalizeFolderPath(value) {
+  if (!value) return '';
+  let normalized = String(value).trim().replace(/\\/g, '/');
+  normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+  if (!normalized || normalized === '.' || normalized === '..') return '';
+  return normalized;
+}
+
+function ensureFolderExists(folderPath) {
+  if (!folderPath) return;
+  const dir = path.join(uploadDir, folderPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 function getNetworkIP() {
@@ -406,14 +422,75 @@ router.put('/folders/rename', (req, res) => {
   broadcast('files', { action: 'batch' });
 });
 
+router.put('/files/:id/move', (req, res) => {
+  const record = db.getFileByStoredName(req.params.id);
+  if (!record) return res.status(404).json({ error: 'File not found' });
+  const targetFolder = normalizeFolderPath(req.body.folderPath || '');
+  if (record.folderPath === targetFolder) return res.json(recordToResponse(record));
+
+  ensureFolderExists(targetFolder);
+  const sourcePath = getFilePath(record);
+  const targetPath = targetFolder
+    ? path.resolve(uploadDir, targetFolder, record.storedName)
+    : path.resolve(uploadDir, record.storedName);
+
+  try {
+    if (fs.existsSync(sourcePath)) fs.renameSync(sourcePath, targetPath);
+  } catch {
+    return res.status(500).json({ error: 'Failed to move file' });
+  }
+
+  db.updateFileFolderPath(record.storedName, targetFolder);
+  record.folderPath = targetFolder;
+  res.json(recordToResponse(record));
+  broadcast('files', { action: 'batch' });
+});
+
+router.post('/files/batch-move', (req, res) => {
+  const { ids, folderPath } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids must be a non-empty array' });
+  const targetFolder = normalizeFolderPath(folderPath || '');
+
+  ensureFolderExists(targetFolder);
+  const moved = [];
+  const notFound = [];
+  const failed = [];
+
+  for (const storedName of ids) {
+    const record = db.getFileByStoredName(storedName);
+    if (!record) { notFound.push(storedName); continue; }
+    if (record.folderPath === targetFolder) { moved.push(storedName); continue; }
+    const sourcePath = getFilePath(record);
+    const targetPath = targetFolder
+      ? path.resolve(uploadDir, targetFolder, record.storedName)
+      : path.resolve(uploadDir, record.storedName);
+    try {
+      if (fs.existsSync(sourcePath)) fs.renameSync(sourcePath, targetPath);
+      db.updateFileFolderPath(record.storedName, targetFolder);
+      moved.push(storedName);
+    } catch {
+      failed.push(storedName);
+    }
+  }
+
+  res.json({ moved, notFound, failed });
+  if (moved.length > 0) broadcast('files', { action: 'batch' });
+});
+
 router.post('/folders', (req, res) => {
-  let { name } = req.body;
-  if (!name || typeof name !== 'string') return res.status(400).json({ error: 'Name is required' });
-  name = name.trim().replace(/[/\\]/g, '');
-  if (!name) return res.status(400).json({ error: 'Invalid folder name' });
-  if (name === '.' || name === '..') return res.status(400).json({ error: 'Invalid folder name' });
-  if (name.length > 255) return res.status(400).json({ error: 'Name too long' });
-  const folderPath = name;
+  let { name, folderPath } = req.body;
+  if (folderPath && typeof folderPath === 'string') {
+    folderPath = normalizeFolderPath(folderPath);
+    if (!folderPath) return res.status(400).json({ error: 'Invalid folder name' });
+    name = path.posix.basename(folderPath);
+  } else {
+    if (!name || typeof name !== 'string') return res.status(400).json({ error: 'Name is required' });
+    name = name.trim().replace(/[/\\]/g, '');
+    if (!name) return res.status(400).json({ error: 'Invalid folder name' });
+    if (name === '.' || name === '..') return res.status(400).json({ error: 'Invalid folder name' });
+    if (name.length > 255) return res.status(400).json({ error: 'Name too long' });
+    folderPath = name;
+  }
   const dir = path.join(uploadDir, folderPath);
   if (fs.existsSync(dir)) return res.status(409).json({ error: 'Folder already exists' });
   try {
@@ -424,6 +501,56 @@ router.post('/folders', (req, res) => {
   db.createFolder(name, folderPath);
   res.json({ success: true, folderPath });
   broadcast('files', { action: 'batch' });
+});
+
+router.delete('/folders', (req, res) => {
+  const folderPath = normalizeFolderPath(req.query.path);
+  if (!folderPath) return res.status(400).json({ error: 'Invalid folder path' });
+
+  // Get all files under this folder (including subfolders)
+  const files = db.getFilesByFolderPrefix(folderPath);
+  const ids = files.map(f => f.storedName);
+
+  // Batch trash all files
+  if (ids.length > 0) {
+    const trashDir = path.join(uploadDir, '_trash');
+    if (!fs.existsSync(trashDir)) fs.mkdirSync(trashDir, { recursive: true });
+
+    for (const file of files) {
+      const filePath = getFilePath(file);
+      const trashFilePath = path.join(trashDir, file.storedName);
+      try {
+        if (fs.existsSync(filePath)) fs.renameSync(filePath, trashFilePath);
+      } catch {}
+      const trashRecord = {
+        id: file.id,
+        originalName: file.originalName,
+        storedName: file.storedName,
+        size: file.size,
+        mimeType: file.mimeType,
+        extension: file.extension,
+        isImage: file.isImage,
+        deviceInfo: file.deviceInfo,
+        folderPath: file.folderPath || '',
+        deletedAt: new Date().toISOString(),
+      };
+      db.deleteFileByStoredName(file.storedName);
+      db.insertTrash(trashRecord);
+    }
+  }
+
+  // Delete folder records
+  db.deleteFolderPrefix(folderPath);
+
+  // Try to remove directory from disk
+  const dir = path.join(uploadDir, folderPath);
+  try {
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
+
+  res.json({ success: true, deleted: ids.length });
+  if (ids.length > 0) broadcast('files', { action: 'batch' });
+  if (ids.length > 0) broadcast('trash', { action: 'batch' });
 });
 
 // ── Trash endpoints ──
