@@ -114,7 +114,11 @@ function getFilePath(record) {
 }
 
 router.get('/config', (req, res) => {
-  res.json({ copyLinkEnabled: process.env.COPY_LINK_ENABLED === 'true' });
+  const maxFileSize = parseInt(db.getConfig('maxFileSize'), 10) || 1073741824;
+  res.json({
+    copyLinkEnabled: process.env.COPY_LINK_ENABLED === 'true',
+    maxFileSize,
+  });
 });
 
 router.get('/config/settings', (req, res) => {
@@ -122,15 +126,27 @@ router.get('/config/settings', (req, res) => {
 });
 
 router.put('/config/settings', (req, res) => {
-  const { trashDays } = req.body;
+  const { trashDays, maxFileSize } = req.body;
+  const updates = {};
+
   if (trashDays !== undefined) {
     const n = parseInt(trashDays, 10);
     if (isNaN(n) || n < 1) return res.status(400).json({ error: 'trashDays must be a positive number' });
     db.setConfig('trashDays', String(n));
     const expired = db.deleteTrashOlderThan(n);
-    return res.json({ trashDays: n, cleaned: expired.length });
+    updates.trashDays = n;
+    updates.cleaned = expired.length;
   }
-  res.json({ error: 'No valid settings provided' });
+
+  if (maxFileSize !== undefined) {
+    const sizeMB = parseInt(maxFileSize, 10);
+    if (isNaN(sizeMB) || sizeMB < 1 || sizeMB > 10000) return res.status(400).json({ error: 'maxFileSize must be 1-10000 (MB)' });
+    db.setConfig('maxFileSize', String(sizeMB * 1024 * 1024));
+    updates.maxFileSize = sizeMB;
+  }
+
+  if (Object.keys(updates).length === 0) return res.json({ error: 'No valid settings provided' });
+  res.json(updates);
 });
 
 router.get('/network-info', (req, res) => {
@@ -223,6 +239,18 @@ router.get('/files/devices', (req, res) => {
 
 router.post('/upload', async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const maxFileSize = parseInt(db.getConfig('maxFileSize'), 10) || 1073741824;
+  const allowOversize = req.headers['x-allow-oversize'] === 'true';
+
+  if (req.file.size > maxFileSize && !allowOversize) {
+    try { fs.unlinkSync(req.file.path); } catch {}
+    return res.status(413).json({
+      error: 'File exceeds size limit',
+      fileSize: req.file.size,
+      maxFileSize,
+    });
+  }
 
   const deviceInfo = req.headers['x-device-info'] || 'unknown';
   const storedName = req.file.filename;
@@ -621,4 +649,8 @@ router.delete('/trash', (req, res) => {
 module.exports = { router, setUploadDir };
 router.get('/stream', (req, res) => {
   initSSE(req, res);
+});
+router.get('/totals', (req, res) => {
+  const row = db.getTotals();
+  res.json(row);
 });

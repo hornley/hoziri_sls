@@ -76,6 +76,11 @@ function init(dbPath) {
   if (!existingTrashDays) {
     setConfig('trashDays', process.env.TRASH_DAYS || '30');
   }
+  const existingMaxFileSize = getConfig('maxFileSize');
+  if (!existingMaxFileSize) {
+    const defaultSize = parseInt(process.env.MAX_FILE_SIZE, 10) || 1073741824;
+    setConfig('maxFileSize', String(defaultSize));
+  }
   return db;
 }
 
@@ -337,6 +342,11 @@ function getAllDevices() {
   return db.prepare('SELECT DISTINCT deviceInfo FROM files ORDER BY deviceInfo').all().map(r => r.deviceInfo);
 }
 
+function getTotals() {
+  const row = db.prepare('SELECT COUNT(*) as totalFiles, COALESCE(SUM(size), 0) as totalSize FROM files').get();
+  return { totalFiles: row.totalFiles, totalSize: row.totalSize };
+}
+
 function getAllDateSources() {
   return ['uploaded', 'metadata'];
 }
@@ -387,4 +397,4 @@ function close() {
   if (db) db.close();
 }
 
-module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, updateFileFolderPath, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getAllDateSources, getAllMetaLocations, getAllMetaCameras, getAllTags, getAllFileTypes, getAllFileExtensions, getAllFolders, getFilesByFolderPrefix, createFolder, deleteFolder, deleteFolderPrefix, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
+module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, updateFileFolderPath, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getTotals, getAllDateSources, getAllMetaLocations, getAllMetaCameras, getAllTags, getAllFileTypes, getAllFileExtensions, getAllFolders, getFilesByFolderPrefix, createFolder, deleteFolder, deleteFolderPrefix, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };

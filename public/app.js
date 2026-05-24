@@ -68,6 +68,7 @@ let uploadConcurrency = (() => {
   return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 2 : 4;
 })();
 let uploadActiveSet = new Set();
+let oversizeAllowSet = new Set();
 
 function getDeviceSlug() {
   const ua = navigator.userAgent;
@@ -131,7 +132,7 @@ async function fetchConfig() {
   try {
     const res = await fetch('/api/config');
     config = await res.json();
-  } catch { config = { copyLinkEnabled: false }; }
+  } catch { config = { copyLinkEnabled: false, maxFileSize: 1073741824 }; }
 }
 
 async function generateQR() {
@@ -386,7 +387,27 @@ async function fetchFiles() {
       renderPagination();
       renderFolderTree();
     }
+    fetchTotals();
   } catch { showToast('Failed to load files', 'error'); }
+}
+
+function formatTotalSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return bytes + ' B';
+}
+
+async function fetchTotals() {
+  try {
+    const res = await fetch('/api/totals');
+    const data = await res.json();
+    const el = document.getElementById('total-stats');
+    if (el) {
+      el.textContent = 'All folders: ' + data.totalFiles + ' file' + (data.totalFiles !== 1 ? 's' : '') + ' · ' + formatTotalSize(data.totalSize);
+    }
+  } catch {}
 }
 
 function renderFileGrid(files) {
@@ -468,8 +489,14 @@ function renderFileGrid(files) {
 
     // Long press for mobile
     let holdTimer = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchMoved = false;
     card.addEventListener('touchstart', (e) => {
       if (dragMoveActive) return;
+      touchStartX = (e.touches[0] || {}).clientX || 0;
+      touchStartY = (e.touches[0] || {}).clientY || 0;
+      touchMoved = false;
       holdTimer = setTimeout(() => {
         holdTimer = null;
         e.preventDefault();
@@ -483,14 +510,24 @@ function renderFileGrid(files) {
         holdTimer = null;
       }
     });
-    card.addEventListener('touchmove', () => {
+    card.addEventListener('touchmove', (e) => {
       if (holdTimer) {
         clearTimeout(holdTimer);
         holdTimer = null;
       }
+      if (!touchMoved && touchStartX && touchStartY) {
+        const t = (e.touches[0] || {});
+        const dx = (t.clientX || 0) - touchStartX;
+        const dy = (t.clientY || 0) - touchStartY;
+        if (Math.hypot(dx, dy) > 8) touchMoved = true;
+      }
     });
 
     card.addEventListener('click', (e) => {
+      if (touchMoved) {
+        touchMoved = false;
+        return;
+      }
       if (e.target.closest('.file-actions')) return;
       if (dragMoveActive || dragMoveSkipClick) {
         dragMoveSkipClick = false;
@@ -548,7 +585,41 @@ function renderFileGrid(files) {
   grid.querySelectorAll('.folder-card').forEach(card => {
     if (card.classList.contains('folder-up-card')) return;
     const folderPath = card.dataset.folder;
+    card.addEventListener('touchstart', (e) => {
+      if (dragMoveActive) return;
+      const startX = (e.touches[0] || {}).clientX || 0;
+      const startY = (e.touches[0] || {}).clientY || 0;
+      card._touchMoved = false;
+      let holdTimer = setTimeout(() => {
+        holdTimer = null;
+        e.preventDefault();
+        enterMultiSelect();
+        toggleFolderSelection(folderPath);
+      }, 500);
+      card.addEventListener('touchend', () => {
+        if (holdTimer) {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+        }
+      }, { once: true });
+      card.addEventListener('touchmove', (ev) => {
+        if (holdTimer) {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+        }
+        if (!card._touchMoved && startX && startY) {
+          const t = (ev.touches[0] || {});
+          const dx = (t.clientX || 0) - startX;
+          const dy = (t.clientY || 0) - startY;
+          if (Math.hypot(dx, dy) > 8) card._touchMoved = true;
+        }
+      }, { once: true });
+    }, { passive: true });
     card.addEventListener('click', (e) => {
+      if (card._touchMoved) {
+        card._touchMoved = false;
+        return;
+      }
       if (dragMoveActive || dragMoveSkipClick) {
         dragMoveSkipClick = false;
         return;
@@ -1364,9 +1435,14 @@ function renderTrashGrid(items) {
   grid.querySelectorAll('.trash-card').forEach(card => {
     const stored = card.dataset.stored;
     let holdTimer = null;
+    let tsX = 0, tsY = 0;
+    let tsMoved = false;
     card.addEventListener('touchstart', (e) => {
       if (dragMoveActive) return;
       if (e.target.closest('.trash-actions')) return;
+      tsX = (e.touches[0] || {}).clientX || 0;
+      tsY = (e.touches[0] || {}).clientY || 0;
+      tsMoved = false;
       holdTimer = setTimeout(() => {
         holdTimer = null;
         e.preventDefault();
@@ -1380,14 +1456,24 @@ function renderTrashGrid(items) {
         holdTimer = null;
       }
     });
-    card.addEventListener('touchmove', () => {
+    card.addEventListener('touchmove', (e) => {
       if (holdTimer) {
         clearTimeout(holdTimer);
         holdTimer = null;
       }
+      if (!tsMoved && tsX && tsY) {
+        const t = (e.touches[0] || {});
+        const dx = (t.clientX || 0) - tsX;
+        const dy = (t.clientY || 0) - tsY;
+        if (Math.hypot(dx, dy) > 8) tsMoved = true;
+      }
     });
 
     card.addEventListener('click', (e) => {
+      if (tsMoved) {
+        tsMoved = false;
+        return;
+      }
       if (e.target.closest('.trash-actions')) return;
       if (dragMoveActive || dragMoveSkipClick) {
         dragMoveSkipClick = false;
@@ -1451,7 +1537,8 @@ function isModalOpen() {
     'settings-modal',
     'qr-modal',
     'filters-modal',
-    'move-modal'
+    'move-modal',
+    'oversize-modal'
   ];
   return modalIds.some(id => {
     const el = document.getElementById(id);
@@ -1781,6 +1868,10 @@ async function setupSettings() {
     if (settings.trashDays) {
       document.getElementById('settings-trash-days').value = settings.trashDays;
     }
+    if (settings.maxFileSize) {
+      const sizeMB = Math.round(parseInt(settings.maxFileSize, 10) / (1024 * 1024));
+      document.getElementById('settings-max-file-size').value = sizeMB;
+    }
   } catch {}
 
   const concurrencySlider = document.getElementById('concurrency-slider');
@@ -1812,13 +1903,20 @@ async function setupSettings() {
 
   document.getElementById('settings-save').addEventListener('click', async () => {
     const trashDays = document.getElementById('settings-trash-days').value;
+    const maxFileSizeMB = document.getElementById('settings-max-file-size').value;
+    const body = { trashDays: parseInt(trashDays, 10) };
+    if (maxFileSizeMB) body.maxFileSize = parseInt(maxFileSizeMB, 10);
     try {
       const res = await fetch('/api/config/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trashDays: parseInt(trashDays, 10) })
+        body: JSON.stringify(body)
       });
       if (res.ok) {
+        const updated = await res.json();
+        if (updated.maxFileSize !== undefined) {
+          config.maxFileSize = updated.maxFileSize * 1024 * 1024;
+        }
         showToast('Settings saved', 'success');
         closeSettings();
       } else {
@@ -2115,6 +2213,10 @@ function uploadFile(file) {
     xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
     xhr.open('POST', '/api/upload');
     xhr.setRequestHeader('X-Device-Info', getDeviceSlug());
+    const fileKey = file.name + '|' + file.size + '|' + file.lastModified;
+    if (oversizeAllowSet.has(fileKey)) {
+      xhr.setRequestHeader('X-Allow-Oversize', 'true');
+    }
     xhr.send(formData);
   });
 }
@@ -2171,6 +2273,7 @@ async function uploadPending() {
         renderPending();
         if (remaining.length === 0 && active.size === 0) {
           uploadActiveSet.clear();
+          oversizeAllowSet.clear();
           uploadBtn.disabled = false;
           uploadBtn.textContent = 'Upload';
           progressContainer.style.display = 'none';
@@ -2214,6 +2317,112 @@ function setupToolbar() {
   });
 }
 
+function getOversizedFiles() {
+  const maxSize = config.maxFileSize || 1073741824;
+  return pendingFiles.filter(f => f.size > maxSize);
+}
+
+function showOversizeModal() {
+  const oversizeList = getOversizedFiles();
+  if (oversizeList.length === 0) return false;
+
+  const maxSize = config.maxFileSize || 1073741824;
+  const maxSizeMB = Math.round(maxSize / (1024 * 1024));
+  const modal = document.getElementById('oversize-modal');
+  const info = document.getElementById('oversize-info');
+  const list = document.getElementById('oversize-list');
+
+  info.textContent = `Limit: ${maxSizeMB} MB. Choose which files to upload anyway.`;
+
+  const toggleStates = new Map();
+  oversizeList.forEach(f => {
+    const key = f.name + '|' + f.size + '|' + f.lastModified;
+    toggleStates.set(key, false);
+  });
+
+  function renderList() {
+    list.innerHTML = oversizeList.map(f => {
+      const key = f.name + '|' + f.size + '|' + f.lastModified;
+      const allowed = toggleStates.get(key);
+      const sizeStr = f.size >= 1073741824
+        ? (f.size / 1073741824).toFixed(1) + ' GB'
+        : (f.size / 1048576).toFixed(1) + ' MB';
+      return `
+        <div class="oversize-item">
+          <span class="os-name">${escapeHtml(f.name)}</span>
+          <span class="os-size">${sizeStr}</span>
+          <button class="os-toggle${allowed ? ' allow' : ''}" data-key="${escapeHtml(key)}">${allowed ? 'Upload anyway' : 'Skip'}</button>
+        </div>
+      `;
+    }).join('');
+
+    list.querySelectorAll('.os-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        const next = !toggleStates.get(key);
+        toggleStates.set(key, next);
+        renderList();
+      });
+    });
+  }
+
+  renderList();
+
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  return new Promise((resolve) => {
+    function cleanup() {
+      modal.style.display = 'none';
+      document.body.style.overflow = '';
+      document.getElementById('oversize-upload-btn').removeEventListener('click', onUpload);
+      document.getElementById('oversize-cancel-btn').removeEventListener('click', onCancel);
+      document.getElementById('oversize-overlay').removeEventListener('click', onCancel);
+    }
+
+    function onUpload() {
+      cleanup();
+      oversizeAllowSet.clear();
+      const skippedKeys = new Set();
+      toggleStates.forEach((allowed, key) => {
+        if (allowed) {
+          oversizeAllowSet.add(key);
+        } else {
+          skippedKeys.add(key);
+        }
+      });
+      if (skippedKeys.size > 0) {
+        for (let i = pendingFiles.length - 1; i >= 0; i--) {
+          const f = pendingFiles[i];
+          const key = f.name + '|' + f.size + '|' + f.lastModified;
+          if (skippedKeys.has(key)) pendingFiles.splice(i, 1);
+        }
+        renderPending();
+      }
+      resolve('upload');
+    }
+
+    function onCancel() {
+      cleanup();
+      oversizeAllowSet.clear();
+      pendingFiles = [];
+      renderPending();
+      resolve('cancel');
+    }
+
+    document.getElementById('oversize-upload-btn').addEventListener('click', onUpload);
+    document.getElementById('oversize-cancel-btn').addEventListener('click', onCancel);
+    document.getElementById('oversize-overlay').addEventListener('click', onCancel);
+
+    document.addEventListener('keydown', function onEsc(e) {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', onEsc);
+        onCancel();
+      }
+    });
+  });
+}
+
 function setupUpload() {
   const form = document.getElementById('upload-form');
   const fileInput = document.getElementById('file-input');
@@ -2231,9 +2440,14 @@ function setupUpload() {
     dropZone.classList.remove('dragover');
     if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
   });
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (pendingFiles.length === 0) return;
+    const oversized = getOversizedFiles();
+    if (oversized.length > 0) {
+      const result = await showOversizeModal();
+      if (result === 'cancel') return;
+    }
     uploadPending();
   });
 }

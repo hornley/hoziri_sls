@@ -299,6 +299,15 @@ header {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.total-stats {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 /* ── Content Area ── */
@@ -976,7 +985,7 @@ header {
 .ctx-placeholder:hover { background: transparent; cursor: default; }
 
 /* ── Modals ── */
-#preview-modal, #confirm-modal, #rename-modal, #settings-modal, #qr-modal, #filters-modal, #move-modal {
+#preview-modal, #confirm-modal, #rename-modal, #settings-modal, #qr-modal, #filters-modal, #move-modal, #oversize-modal {
   display: none;
   position: fixed;
   inset: 0;
@@ -985,7 +994,7 @@ header {
   justify-content: center;
 }
 
-#preview-overlay, #confirm-overlay, #rename-overlay, #settings-overlay, #qr-overlay, #filters-overlay, #move-overlay {
+#preview-overlay, #confirm-overlay, #rename-overlay, #settings-overlay, #qr-overlay, #filters-overlay, #move-overlay, #oversize-overlay {
   position: absolute;
   inset: 0;
   background: rgba(0,0,0,0.6);
@@ -1111,7 +1120,7 @@ header {
 }
 
 /* Confirm modal */
-#confirm-content, .rename-content, #settings-content, #qr-content, #move-content {
+#confirm-content, .rename-content, #settings-content, #qr-content, #move-content, #oversize-content {
   position: relative;
   background: var(--surface);
   border-radius: var(--radius-lg);
@@ -1178,6 +1187,88 @@ header {
 #move-target:focus, #move-new:focus { border-color: var(--primary); }
 
 .move-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Oversize modal */
+#oversize-content {
+  max-width: 500px;
+  width: min(90vw, 500px);
+}
+
+#oversize-content h3 {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+#oversize-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+#oversize-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.oversize-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+.oversize-item .os-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.oversize-item .os-size {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.oversize-item .os-toggle {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-body);
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.oversize-item .os-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.oversize-item .os-toggle.allow {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-surface);
+}
+
+.oversize-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;

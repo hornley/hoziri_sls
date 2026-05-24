@@ -31,10 +31,7 @@ function configure(storageDir) {
     }
   });
 
-  return multer({
-    storage,
-    limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE, 10) || 1073741824 }
-  });
+  return multer({ storage });
 }
 
 module.exports = { configure };
