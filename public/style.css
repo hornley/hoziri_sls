@@ -1205,6 +1205,70 @@ header {
 
 .settings-field input:focus { border-color: var(--primary); }
 
+.settings-field input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  outline: none;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+}
+
+.settings-field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-field input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-field input[type="range"]:focus {
+  box-shadow: 0 0 0 2px var(--primary-surface);
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border-light);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.pending-file.uploading {
+  opacity: 0.6;
+}
+
+.pending-file.uploading .pf-name {
+  color: var(--primary);
+  font-weight: 500;
+}
+
 /* QR modal */
 #qr-content { text-align: center; }
 

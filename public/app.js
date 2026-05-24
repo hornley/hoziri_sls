@@ -62,6 +62,12 @@ let realtimeSource = null;
 let realtimeDebounce = null;
 let pollIntervalId = null;
 let lastScrollY = 0;
+let uploadConcurrency = (() => {
+  const stored = localStorage.getItem('uploadConcurrency');
+  if (stored) return parseInt(stored, 10);
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 2 : 4;
+})();
+let uploadActiveSet = new Set();
 
 function getDeviceSlug() {
   const ua = navigator.userAgent;
@@ -1777,6 +1783,25 @@ async function setupSettings() {
     }
   } catch {}
 
+  const concurrencySlider = document.getElementById('concurrency-slider');
+  const concurrencyValue = document.getElementById('concurrency-value');
+  if (concurrencySlider) {
+    const stored = parseInt(localStorage.getItem('uploadConcurrency'), 10);
+    const current = Number.isFinite(stored) && stored >= 1 && stored <= 8
+      ? stored
+      : (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 2 : 4);
+    concurrencySlider.value = current;
+    if (concurrencyValue) concurrencyValue.textContent = current;
+    uploadConcurrency = current;
+
+    concurrencySlider.addEventListener('input', () => {
+      const value = parseInt(concurrencySlider.value, 10);
+      if (concurrencyValue) concurrencyValue.textContent = value;
+      uploadConcurrency = value;
+      localStorage.setItem('uploadConcurrency', String(value));
+    });
+  }
+
   const modal = document.getElementById('settings-modal');
   document.getElementById('settings-toggle').addEventListener('click', () => {
     modal.style.display = 'flex';
@@ -2042,8 +2067,15 @@ function renderPending() {
   if (pendingFiles.length === 0) { section.style.display = 'none'; return; }
   section.style.display = 'block';
   list.innerHTML = pendingFiles.map((f, i) => {
+    const key = f.name + '|' + f.size + '|' + f.lastModified;
+    const isActive = uploadActiveSet.has(key);
     const icon = f.type && f.type.startsWith('image/') ? '🖼' : '📄';
-    return `<div class="pending-file"><span>${icon}</span><span class="pf-name">${escapeHtml(f.name)}</span><span class="pf-size">${formatSize(f.size)}</span><button class="remove-btn" data-index="${i}">&times;</button></div>`;
+    const nameHtml = isActive
+      ? `<span class="pf-name"><span class="spinner"></span>${escapeHtml(f.name)}</span>`
+      : `<span class="pf-name">${escapeHtml(f.name)}</span>`;
+    const removeBtn = isActive ? '' : `<button class="remove-btn" data-index="${i}">&times;</button>`;
+    const statusClass = isActive ? ' uploading' : '';
+    return `<div class="pending-file${statusClass}"><span>${icon}</span>${nameHtml}<span class="pf-size">${formatSize(f.size)}</span>${removeBtn}</div>`;
   }).join('');
   list.querySelectorAll('.remove-btn').forEach(btn => {
     btn.addEventListener('click', () => removeFile(parseInt(btn.dataset.index)));
@@ -2093,27 +2125,68 @@ async function uploadPending() {
   const progressBar = document.getElementById('progress-bar');
   const progressText = document.getElementById('progress-text');
   const files = [...pendingFiles];
+  const total = files.length;
+  let done = 0;
+  let failed = 0;
+  let activeCount = 0;
+
   uploadBtn.disabled = true;
   uploadBtn.textContent = 'Uploading...';
   progressContainer.style.display = 'flex';
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    progressBar.value = 0;
-    progressText.textContent = `0% (${i + 1}/${files.length})`;
-    uploadBtn.textContent = `Uploading ${i + 1}/${files.length}...`;
-    try {
-      await uploadFile(file);
-      showToast(file.name + ' uploaded', 'success');
-      const idx = pendingFiles.findIndex(f =>
-        f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
-      );
-      if (idx !== -1) { pendingFiles.splice(idx, 1); renderPending(); }
-    } catch (err) { showToast('Failed: ' + file.name, 'error'); }
+  uploadActiveSet.clear();
+
+  const cap = uploadConcurrency;
+  const remaining = [...files];
+  const active = new Set();
+
+  function updateProgress() {
+    progressBar.value = total > 0 ? Math.round(((done + failed) / total) * 100) : 0;
+    progressText.textContent = `${done} / ${total} uploaded` + (activeCount > 0 ? ` (${activeCount} active)` : '');
+    uploadBtn.textContent = `Uploading ${done + activeCount} / ${total}...`;
   }
-  uploadBtn.disabled = false;
-  uploadBtn.textContent = 'Upload';
-  progressContainer.style.display = 'none';
-  fetchFiles();
+
+  function tryNext() {
+    while (remaining.length > 0 && active.size < cap) {
+      const file = remaining.shift();
+      const key = file.name + '|' + file.size + '|' + file.lastModified;
+
+      activeCount = active.size + 1;
+      uploadActiveSet.add(key);
+      renderPending();
+
+      const promise = uploadFile(file).then(() => {
+        done++;
+        const idx = pendingFiles.findIndex(f =>
+          f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
+        );
+        if (idx !== -1) { pendingFiles.splice(idx, 1); }
+      }).catch(() => {
+        failed++;
+        showToast('Failed: ' + file.name, 'error');
+      }).finally(() => {
+        uploadActiveSet.delete(key);
+        active.delete(promise);
+        activeCount = active.size;
+        updateProgress();
+        renderPending();
+        if (remaining.length === 0 && active.size === 0) {
+          uploadActiveSet.clear();
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = 'Upload';
+          progressContainer.style.display = 'none';
+          showToast(done + ' uploaded' + (failed > 0 ? ', ' + failed + ' failed' : ''), done > 0 ? 'success' : 'error');
+          fetchFiles();
+        } else {
+          tryNext();
+        }
+      });
+
+      active.add(promise);
+      updateProgress();
+    }
+  }
+
+  tryNext();
 }
 
 function setupToolbar() {
