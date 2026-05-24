@@ -10,11 +10,11 @@ const { initSSE, broadcast } = require('../utils/realtime');
 const router = express.Router();
 let uploadDir = 'uploads';
 let thumbDir = '';
-const THUMBNAILS_ENABLED = false;
+const THUMBNAILS_ENABLED = true;
 
 function setUploadDir(dir) {
-  uploadDir = dir;
-  thumbDir = path.join(dir, '.thumbnails');
+  uploadDir = path.resolve(dir);
+  thumbDir = path.resolve(dir, '.thumbnails');
 }
 
 function recordToResponse(record) {
@@ -41,7 +41,7 @@ function recordToResponse(record) {
     extension: record.extension,
     isImage: record.isImage === 1,
     url: urlPath + record.storedName,
-    thumbnailUrl: undefined,
+    thumbnailUrl: record.isImage ? '/api/thumbnails/' + record.storedName : undefined,
     deviceInfo: record.deviceInfo,
     uploadedAt: record.uploadedAt,
   };
@@ -285,6 +285,16 @@ router.post('/upload', async (req, res) => {
 
   db.insertFile(record);
 
+  if (folderPath) {
+    const segments = folderPath.replace(/\\/g, '/').split('/');
+    let accumulated = '';
+    for (const seg of segments) {
+      if (!seg) continue;
+      accumulated = accumulated ? accumulated + '/' + seg : seg;
+      db.upsertFolder(seg, accumulated);
+    }
+  }
+
   if (THUMBNAILS_ENABLED && meta.isImage && meta.size > 10240 && thumbDir) {
     const filePath = folderPath
       ? path.resolve(uploadDir, folderPath, storedName)
@@ -295,6 +305,32 @@ router.post('/upload', async (req, res) => {
   broadcast('files', { action: 'upload', storedName: record.storedName });
 
   res.status(201).json(recordToResponse(record));
+});
+
+router.get('/thumbnails/:storedName', async (req, res) => {
+  const record = db.getFileByStoredName(req.params.storedName);
+  if (!record || !record.isImage) return res.status(404).end();
+
+  const filePath = getFilePath(record);
+  if (!fs.existsSync(filePath)) return res.status(404).end();
+
+  const thumbPath = path.join(thumbDir, record.storedName);
+
+  if (!fs.existsSync(thumbPath)) {
+    try {
+      await generateThumbnail(filePath, thumbDir);
+    } catch (err) {
+      console.error('Thumbnail generation failed:', err.message);
+      return res.status(404).end();
+    }
+    if (!fs.existsSync(thumbPath)) {
+      console.error('Thumbnail not created at:', thumbPath);
+      return res.status(404).end();
+    }
+  }
+
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(thumbPath);
 });
 
 router.post('/files/download', async (req, res) => {

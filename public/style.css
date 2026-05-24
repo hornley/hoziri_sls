@@ -506,7 +506,9 @@ header {
   align-items: center;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  transition: border-color 0.1s, box-shadow 0.1s, transform 0.1s;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
 }
 
 .file-card:hover {

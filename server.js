@@ -29,24 +29,6 @@ if (!fs.existsSync(trashDir)) fs.mkdirSync(trashDir, { recursive: true });
 
 db.init(DB_PATH);
 
-// Generate missing thumbnails for existing images on startup (disabled)
-const sharp = require('sharp');
-function generateMissingThumbnails() {
-  const files = db.getAllFiles();
-  let count = 0;
-  for (const f of files) {
-    if (!f.isImage) continue;
-    const thumbPath = path.join(thumbDir, f.storedName);
-    if (fs.existsSync(thumbPath)) continue;
-    const fp = f.folderPath ? path.join(uploadsAbsolute, f.folderPath, f.storedName) : path.join(uploadsAbsolute, f.storedName);
-    if (!fs.existsSync(fp)) continue;
-    sharp(fp).resize(200, 200, { fit: 'cover', withoutEnlargement: true }).toFile(thumbPath).catch(() => {});
-    count++;
-  }
-  if (count > 0) console.log(`Generating ${count} missing thumbnail(s)...`);
-}
-// generateMissingThumbnails();
-
 function autoPurgeTrash() {
   const trashDays = parseInt(db.getConfig('trashDays'), 10) || 30;
   const expired = db.deleteTrashOlderThan(trashDays);

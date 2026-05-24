@@ -81,6 +81,13 @@ function init(dbPath) {
     const defaultSize = parseInt(process.env.MAX_FILE_SIZE, 10) || 1073741824;
     setConfig('maxFileSize', String(defaultSize));
   }
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_folderPath ON files(folderPath)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_uploadedAt ON files(uploadedAt)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_deviceInfo ON files(deviceInfo)');
+
+  db.exec("INSERT OR IGNORE INTO folders (name, folderPath) SELECT DISTINCT folderPath, folderPath FROM files WHERE folderPath != '' AND folderPath IS NOT NULL");
+
   return db;
 }
 
@@ -254,7 +261,7 @@ function getFilesFiltered({
 }
 
 function getAllFolders() {
-  return db.prepare("SELECT DISTINCT folderPath FROM files WHERE folderPath != '' AND folderPath IS NOT NULL UNION SELECT folderPath FROM folders ORDER BY folderPath").all().map(r => r.folderPath);
+  return db.prepare('SELECT folderPath FROM folders ORDER BY folderPath').all().map(r => r.folderPath);
 }
 
 function getFilesByFolderPrefix(folderPath) {
@@ -265,6 +272,10 @@ function getFilesByFolderPrefix(folderPath) {
 
 function createFolder(name, folderPath) {
   db.prepare('INSERT INTO folders (name, folderPath) VALUES (?, ?)').run(name, folderPath);
+}
+
+function upsertFolder(name, folderPath) {
+  db.prepare('INSERT OR IGNORE INTO folders (name, folderPath) VALUES (?, ?)').run(name, folderPath);
 }
 
 function deleteFolder(folderPath) {
@@ -397,4 +408,4 @@ function close() {
   if (db) db.close();
 }
 
-module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, updateFileFolderPath, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getTotals, getAllDateSources, getAllMetaLocations, getAllMetaCameras, getAllTags, getAllFileTypes, getAllFileExtensions, getAllFolders, getFilesByFolderPrefix, createFolder, deleteFolder, deleteFolderPrefix, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };
+module.exports = { init, getAllFiles, getFilesFiltered, getFileByStoredName, getFileById, insertFile, renameFile, deleteFileByStoredName, deleteFilesByStoredNames, updateFileFolderPath, renameFolder, getConfig, setConfig, getAllConfig, getAllDevices, getTotals, getAllDateSources, getAllMetaLocations, getAllMetaCameras, getAllTags, getAllFileTypes, getAllFileExtensions, getAllFolders, getFilesByFolderPrefix, createFolder, upsertFolder, deleteFolder, deleteFolderPrefix, getAllTrash, insertTrash, getTrashByStoredName, deleteTrashByStoredName, deleteAllTrash, deleteTrashOlderThan, close };

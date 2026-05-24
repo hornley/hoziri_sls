@@ -465,7 +465,7 @@ function renderFileGrid(files) {
     const isSelected = selectedFiles.has(file.storedName);
     const icon = getFileIcon(file.extension, file.mimeType);
     const preview = file.isImage
-      ? `<img class="preview" src="${file.url}" alt="${file.originalName}" loading="lazy" onerror="this.onerror=null;this.style.objectFit='contain'">`
+      ? `<img class="preview" src="${file.thumbnailUrl || file.url}" alt="${file.originalName}" loading="lazy" onerror="this.onerror=null;this.src='${file.url}';this.style.objectFit='contain'">`
       : (icon ? `<div class="file-icon">${icon}</div>` : `<div class="file-icon">📄</div>`);
     const copyBtn = config.copyLinkEnabled
       ? `<button class="copy-btn" data-url="${file.url}">Copy Link</button>`
