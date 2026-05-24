@@ -400,8 +400,8 @@ function renderFileGrid(files) {
 
   // Folder cards — show all at root, or sub-folders inside a folder
   const visibleFolders = currentFolder
-    ? allFolders.filter(f => f.startsWith(currentFolder + '/'))
-    : allFolders;
+    ? allFolders.filter(f => f.startsWith(currentFolder + '/') && !f.slice(currentFolder.length + 1).includes('/'))
+    : allFolders.filter(f => !f.includes('/'));
   if (visibleFolders.length > 0) {
     for (const folder of visibleFolders) {
       const displayName = currentFolder ? folder.slice(currentFolder.length + 1) : folder;
