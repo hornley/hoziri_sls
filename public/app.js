@@ -442,6 +442,7 @@ function renderFileGrid(files) {
 
   grid.querySelectorAll('.file-card').forEach(card => {
     const stored = card.dataset.stored;
+    if (!stored) return; // folder cards handled by .folder-card loop
 
     // Long press for mobile
     let holdTimer = null;
@@ -487,7 +488,6 @@ function renderFileGrid(files) {
     });
 
     card.addEventListener('contextmenu', (e) => {
-      if (!stored) return; // handled by folder card listener
       const file = filesState.files.find(f => f.storedName === stored);
       hideContextMenu();
       showContextMenu(e.clientX, e.clientY, { type: 'file', storedName: stored, file });
@@ -568,14 +568,6 @@ function renderFileGrid(files) {
       fetchFiles();
     });
   }
-
-  // Empty area context menu
-  grid.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.file-card, .folder-breadcrumb')) return;
-    e.preventDefault();
-    hideContextMenu();
-    showContextMenu(e.clientX, e.clientY, { type: 'empty' });
-  });
 
   // Mobile long-press on empty space
   grid.addEventListener('touchstart', (e) => {
@@ -700,7 +692,6 @@ function exitMultiSelect() {
 }
 
 function toggleFileSelection(storedName) {
-  console.log('toggleFileSelection: storedName=%s had=%s', storedName, selectedFiles.has(storedName));
   if (selectedFiles.has(storedName)) selectedFiles.delete(storedName);
   else selectedFiles.add(storedName);
   updateMultiUI();
@@ -717,7 +708,7 @@ function updateMultiUI(options = {}) {
   const count = selectedFiles.size + selectedFolders.size;
   const toolbar = document.getElementById('multi-toolbar');
   document.getElementById('multi-count').textContent = count + ' item' + (count !== 1 ? 's' : '') + ' selected';
-  if (count === 0) {
+  if (count === 0 && !dragSelecting) {
     toolbar.classList.remove('visible');
     document.body.classList.remove('multiselect-active');
     multiSelectActive = false;
@@ -1007,7 +998,6 @@ function showContextMenu(x, y, ctx) {
         if (multiSelectActive) {
           const ids = Array.from(selectedFiles);
           const folderPaths = Array.from(selectedFolders);
-          console.log('multi-delete: ids=%o folderPaths=%o multiSelectActive=%s isFolder=%s', ids, folderPaths, multiSelectActive, isFolder);
           if (ids.length > 0 && folderPaths.length > 0) {
             showConfirmModal('Move ' + ids.length + ' file(s) and delete ' + folderPaths.length + ' folder(s) to trash?', async () => {
               await batchDeleteFilesAndFolders(ids, folderPaths);
@@ -1550,6 +1540,17 @@ function finishDragSelect() {
   updateMultiUI({ skipRender: true });
 }
 
+function setupGridContextMenu() {
+  const grid = document.getElementById('file-grid');
+  if (!grid) return;
+  grid.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.file-card, .folder-breadcrumb')) return;
+    e.preventDefault();
+    hideContextMenu();
+    showContextMenu(e.clientX, e.clientY, { type: 'empty' });
+  });
+}
+
 function setupDragSelect() {
   const grid = document.getElementById('file-grid');
   if (!grid) return;
@@ -1566,7 +1567,6 @@ function getDragMoveIds() {
 function startDragMoveFromCard(e, storedName) {
   if (showingTrash) return;
   if (e.button !== undefined && e.button !== 0) return;
-  if (currentFolder) return;
   if (selectedFolders.size > 0) {
     showToast('Folders cannot be moved yet', 'info');
     return;
@@ -1632,7 +1632,7 @@ function setupDragMove() {
   grid.addEventListener('mousedown', (e) => {
     const card = e.target.closest('.file-card[data-stored]');
     if (!card || e.target.closest('.file-actions')) return;
-    if (currentFolder || showingTrash) return;
+    if (showingTrash) return;
     if (selectedFolders.size > 0) return;
     if (e.ctrlKey || e.metaKey) return;
     if (dragSelecting) return;
@@ -1664,7 +1664,6 @@ function setupDragMove() {
     const card = e.target.closest('.file-card[data-stored]');
     if (!card || e.target.closest('.file-actions')) return;
     if (dragSelecting) return;
-    if (currentFolder) return;
     if (showingTrash) return;
     if (e.target.closest('.folder-card')) return;
     if (selectedFolders.size > 0) return;
@@ -1829,7 +1828,6 @@ function setupRenameModal() {
       let res;
       if (renameContext.type === 'create-folder') {
         const folderPath = renameContext.parentFolder ? renameContext.parentFolder + '/' + name : name;
-        console.log('create-folder: parentFolder=%s name=%s folderPath=%s', renameContext.parentFolder, name, folderPath);
         res = await fetch('/api/folders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1934,7 +1932,6 @@ function setupMoveModal() {
     if (newName) {
       try {
         const folderPath = currentFolder ? currentFolder + '/' + newName : newName;
-        console.log('move-modal create-folder: currentFolder=%s newName=%s folderPath=%s', currentFolder, newName, folderPath);
         const res = await fetch('/api/folders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2501,6 +2498,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupRenameModal();
   setupMoveModal();
   setupFiltersModal();
+  setupGridContextMenu();
   setupDragSelect();
   setupDragMove();
   setupKeyboardShortcuts();
