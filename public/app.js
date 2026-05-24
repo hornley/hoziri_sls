@@ -393,9 +393,25 @@ function renderFileGrid(files) {
 
   let html = '';
 
-  // Breadcrumb when viewing a folder
+  // Toolbar breadcrumb when viewing a folder
+  const breadcrumb = document.getElementById('breadcrumb');
+  if (breadcrumb) {
+    if (currentFolder) {
+      breadcrumb.innerHTML = `<div class="breadcrumb-inner"><button class="folder-back-btn" data-action="back">← Back to root</button><span class="breadcrumb-current">📁 ${escapeHtml(currentFolder)}</span></div>`;
+    } else {
+      breadcrumb.innerHTML = '';
+    }
+  }
+
+  // Up folder card
   if (currentFolder) {
-    html += `<div class="folder-breadcrumb"><button class="folder-back-btn" data-action="back">← Back to root</button><span class="folder-breadcrumb-name">📁 ${escapeHtml(currentFolder)}</span></div>`;
+    html += `
+      <div class="file-card folder-up-card" data-action="up">
+        <div class="folder-card-icon">📁</div>
+        <div class="file-name">..</div>
+        <div class="folder-card-hint">Up one level</div>
+      </div>
+    `;
   }
 
   // Folder cards — show all at root, or sub-folders inside a folder
@@ -503,8 +519,28 @@ function renderFileGrid(files) {
     });
   });
 
+  // Folder up card
+  const upCard = grid.querySelector('.folder-up-card');
+  if (upCard) {
+    upCard.addEventListener('click', () => {
+      document.getElementById('upload-section').style.display = 'none';
+      if (currentFolder.includes('/')) {
+        currentFolder = currentFolder.slice(0, currentFolder.lastIndexOf('/'));
+      } else {
+        currentFolder = '';
+      }
+      currentPage = 1;
+      exitMultiSelect();
+      document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+      const allFilesBtn = document.getElementById('sidebar-all-files');
+      if (allFilesBtn) allFilesBtn.classList.add('active');
+      fetchFiles();
+    });
+  }
+
   // Folder card clicks
   grid.querySelectorAll('.folder-card').forEach(card => {
+    if (card.classList.contains('folder-up-card')) return;
     const folderPath = card.dataset.folder;
     card.addEventListener('click', (e) => {
       if (dragMoveActive || dragMoveSkipClick) {
@@ -555,7 +591,7 @@ function renderFileGrid(files) {
 
 
   // Folder breadcrumb back button
-  const backBtn = grid.querySelector('.folder-back-btn');
+  const backBtn = document.querySelector('.folder-back-btn');
   if (backBtn) {
     backBtn.addEventListener('click', () => {
       document.getElementById('upload-section').style.display = 'none';
@@ -571,7 +607,7 @@ function renderFileGrid(files) {
 
   // Mobile long-press on empty space
   grid.addEventListener('touchstart', (e) => {
-    if (e.target.closest('.file-card, .folder-card, .folder-breadcrumb')) return;
+    if (e.target.closest('.file-card, .folder-card')) return;
     let holdTimer = setTimeout(() => {
       holdTimer = null;
       const touch = e.touches[0];
@@ -1502,7 +1538,7 @@ function scheduleDragUpdate() {
 function startDragSelect(e) {
   if (e.button !== 0) return;
   if (isModalOpen()) return;
-  if (e.target.closest('.file-card, .folder-card, .folder-breadcrumb, .trash-actions')) return;
+  if (e.target.closest('.file-card, .folder-card, .trash-actions')) return;
   dragSelecting = true;
   dragStart = { x: e.clientX, y: e.clientY };
   dragLastPoint = { x: e.clientX, y: e.clientY };
@@ -1544,7 +1580,7 @@ function setupGridContextMenu() {
   const grid = document.getElementById('file-grid');
   if (!grid) return;
   grid.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.file-card, .folder-breadcrumb')) return;
+    if (e.target.closest('.file-card')) return;
     e.preventDefault();
     hideContextMenu();
     showContextMenu(e.clientX, e.clientY, { type: 'empty' });

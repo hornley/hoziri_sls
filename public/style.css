@@ -377,6 +377,9 @@ header {
 }
 
 .breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
@@ -386,6 +389,7 @@ header {
   align-items: center;
   gap: 6px;
   font-size: 13px;
+  min-width: 0;
 }
 
 .breadcrumb-link {
@@ -408,6 +412,11 @@ header {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.breadcrumb .folder-back-btn {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .toolbar-right {
@@ -629,6 +638,7 @@ header {
 
 .folder-back-btn:hover { background: var(--primary-surface); }
 
+/* Folder breadcrumb name (grid) */
 .folder-breadcrumb-name {
   color: var(--text);
   font-weight: 500;
